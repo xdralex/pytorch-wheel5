@@ -160,7 +160,7 @@ def fit(device: Union[torch.device, int],
         assert set(train_metrics.keys()) == set(val_metrics.keys())
         assert 'epoch' not in train_metrics
 
-        metrics = {}
+        metrics = {'epoch': epoch}
         for key in train_metrics.keys():
             tb_writer.add_scalar(f'fit/train/{key}', train_metrics[key], epoch)
             tb_writer.add_scalar(f'fit/val/{key}', val_metrics[key], epoch)

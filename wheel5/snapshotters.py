@@ -67,12 +67,12 @@ class BestCVSnapshotter(Snapshotter):
     def __init__(self, dump_dir: str, metric_name: str, asc: bool, best: int = 1):
         self.logger = logging.getLogger(f'{__name__}.BestCVSnapshotter')
 
-        self.dump_dir = dump_dir
         self.metric_name = metric_name
         self.ascending = asc
         self.safe_metric_name = re.sub(r'[^0-9a-zA-Z]+', '', self.metric_name)
         self.best = best
 
+        self.dump_dir = dump_dir
         pathlib.Path(dump_dir).mkdir(parents=True, exist_ok=True)
         self.logger.info(f'Initialized snapshot dir: {dump_dir}')
 
@@ -127,14 +127,29 @@ class PeriodicSnapshotter(Snapshotter):
     def __init__(self, dump_dir: str, frequency: int = 10):
         self.logger = logging.getLogger(f'{__name__}.PeriodicSnapshotter')
 
-        self.dump_dir = dump_dir
         self.frequency = frequency
 
+        self.dump_dir = dump_dir
         pathlib.Path(dump_dir).mkdir(parents=True, exist_ok=True)
         self.logger.info(f'Initialized snapshot dir: {dump_dir}')
 
     def epoch_completed(self, state: FitState):
         if (state.epoch - 1) % self.frequency == 0:
             path = os.path.join(self.dump_dir, f'checkpoint-epoch_{state.epoch}.pth.tar')
+            FitState.save(path, state)
+            self.logger.info(f'Saved snapshot: {path}')
+
+
+class FinalSnapshotter(Snapshotter):
+    def __init__(self, dump_dir: str):
+        self.logger = logging.getLogger(f'{__name__}.CompletedSnapshotter')
+
+        self.dump_dir = dump_dir
+        pathlib.Path(dump_dir).mkdir(parents=True, exist_ok=True)
+        self.logger.info(f'Initialized snapshot dir: {dump_dir}')
+
+    def epoch_completed(self, state: FitState):
+        if state.epoch == state.num_epochs:
+            path = os.path.join(self.dump_dir, f'final.pth.tar')
             FitState.save(path, state)
             self.logger.info(f'Saved snapshot: {path}')
