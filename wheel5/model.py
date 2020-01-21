@@ -21,8 +21,8 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from tabulate import tabulate
 
-from wheel5 import cuda
-from wheel5.metrics import AverageMeter, AccuracyMeter, ArrayAccumMeter
+from . import cuda
+from .metrics import AverageMeter, AccuracyMeter, ArrayAccumMeter
 
 
 class EpochHandler(ABC):
