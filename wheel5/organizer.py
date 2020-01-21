@@ -1,6 +1,6 @@
 import datetime
 import os
-from typing import Optional
+from typing import Optional, Dict, Union
 
 
 class OrganizerNow(object):
@@ -15,6 +15,10 @@ class OrganizerNow(object):
 
     def tensorboard_dir(self, suffix: Optional[str] = None):
         return self._dir(self.tensorboard_root, suffix)
+
+    @staticmethod
+    def suffix(hparams: Dict[str, Union[int, float]]):
+        return '-'.join([f'{k}_{v}' for k, v in hparams.items()])
 
     def _dir(self, root_dir, suffix: Optional[str] = None) -> str:
         if suffix is None:
