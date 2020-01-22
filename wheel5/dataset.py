@@ -21,10 +21,11 @@ class LMDBImageDataset(Dataset):
                getitem_transform: Callable[[Img], Img] = None):
 
         if os.path.exists(lmdb_path):
-            assert os.path.isdir(lmdb_path)
-            return LMDBImageDataset(df, lmdb_path, lmdb_map_size, getitem_transform)
+            assert os.path.isdir(lmdb_path)            
         else:
             LMDBImageDataset.prepare(df, image_dir, lmdb_path, lmdb_map_size, prepare_transform)
+            
+        return LMDBImageDataset(df, lmdb_path, lmdb_map_size, getitem_transform)
 
     @staticmethod
     def prepare(df: pd.DataFrame, image_dir: str, lmdb_path: str, lmdb_map_size: int = int(8 * (1024 ** 3)), transform: Callable[[Img], Img] = None):
