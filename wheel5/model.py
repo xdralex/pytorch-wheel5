@@ -164,7 +164,6 @@ def fit(device: Union[torch.device, int],
         for key in train_metrics.keys():
             tb_writer.add_scalar(f'fit/train/{key}', train_metrics[key], epoch)
             tb_writer.add_scalar(f'fit/val/{key}', val_metrics[key], epoch)
-            tb_writer.add_scalars(f'fit/{key}', {'train': train_metrics[key], 'val': val_metrics[key]}, epoch)
 
             metrics[f'train_{key}'] = train_metrics[key]
             metrics[f'val_{key}'] = val_metrics[key]

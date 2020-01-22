@@ -3,36 +3,43 @@ import os
 from typing import Optional, Dict, Union
 
 
-class OrganizerNow(object):
-    def __init__(self, snapshot_root: str, tensorboard_root: str, experiment: str):
+class OrganizerTrial(object):
+    def __init__(self, snapshot_root: str, tensorboard_root: str, experiment: str, key: str):
         self.snapshot_root = snapshot_root
         self.tensorboard_root = tensorboard_root
         self.experiment = experiment
-        self.now = f'{datetime.datetime.now():%Y-%m-%d_%H:%M:%S}'
+        self.key = key
 
-    def snapshot_dir(self, suffix: Optional[str] = None):
-        return self._dir(self.snapshot_root, suffix)
+    def snapshot_dir(self):
+        return self._dir(self.snapshot_root)
 
-    def tensorboard_dir(self, suffix: Optional[str] = None):
-        return self._dir(self.tensorboard_root, suffix)
+    def tensorboard_dir(self):
+        return self._dir(self.tensorboard_root)
 
     @staticmethod
     def suffix(hparams: Dict[str, Union[int, float]]):
         return '-'.join([f'{k}_{v}' for k, v in hparams.items()])
 
-    def _dir(self, root_dir, suffix: Optional[str] = None) -> str:
-        if suffix is None:
-            return os.path.join(root_dir, self.experiment, self.now)
-        else:
-            return os.path.join(root_dir, self.experiment, self.now, suffix)
+    def _dir(self, root_dir) -> str:
+        return os.path.join(root_dir, self.experiment, self.key)
 
 
 class Organizer(object):
-    def __init__(self, snapshot_root: str, tensorboard_root: str):
+    def __init__(self, snapshot_root: str, tensorboard_root: str, experiment: str):
         self.snapshot_root = snapshot_root
         self.tensorboard_root = tensorboard_root
+        self.experiment = experiment
+        self.trials = {}
 
-    def now(self, experiment):
-        return OrganizerNow(snapshot_root=self.snapshot_root,
-                            tensorboard_root=self.tensorboard_root,
-                            experiment=experiment)
+    def trial(self, hparams: Optional[Dict[str, Union[int, float]]] = None):
+        if hparams is None:
+            key = f'{datetime.datetime.now():%Y-%m-%d_%H:%M:%S}'
+        else:
+            key = '-'.join([f'{k}_{v}' for k, v in hparams.items()])
+
+        counter = self.trials.setdefault(key, 0)
+        self.trials[key] += 1
+        if counter > 0:
+            key = f'{key}_{counter}'
+
+        return OrganizerTrial(self.snapshot_root, self.tensorboard_root, self.experiment, key)

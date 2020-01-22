@@ -77,7 +77,7 @@ class BestCVSnapshotter(Snapshotter):
         self.logger.info(f'Initialized snapshot dir: {dump_dir}')
 
         entries = [entry for entry in os.listdir(dump_dir) if os.path.isfile(entry)]
-        pattern = re.compile(r'^best-epoch_(?P<epoch>\d+)-' + self.safe_metric_name + r'_(?P<metric>[-+]?[0-9]*\.?[0-9]+)\.pth\.tar$')
+        pattern = re.compile(r'^bestcv-epoch_(?P<epoch>\d+)-' + self.safe_metric_name + r'_(?P<metric>[-+]?[0-9]*\.?[0-9]+)\.pth\.tar$')
         matched_entries = []
         for filename in entries:
             m = pattern.match(filename)
@@ -97,7 +97,7 @@ class BestCVSnapshotter(Snapshotter):
     def epoch_completed(self, state: FitState):
         epoch = int(state.epoch)
         metric = float(state.val_metrics[self.metric_name])
-        filename = f'best-epoch_{epoch}-{self.safe_metric_name}_{metric:.8f}.pth.tar'
+        filename = f'bestcv-epoch_{epoch}-{self.safe_metric_name}_{metric:.8f}.pth.tar'
 
         self.leaderboard = self.leaderboard.append({'epoch': epoch, 'metric': metric, 'filename': filename}, ignore_index=True)
         self.leaderboard = self.leaderboard.sort_values(by='metric', ascending=self.ascending)
@@ -135,14 +135,14 @@ class PeriodicSnapshotter(Snapshotter):
 
     def epoch_completed(self, state: FitState):
         if (state.epoch - 1) % self.frequency == 0:
-            path = os.path.join(self.dump_dir, f'checkpoint-epoch_{state.epoch}.pth.tar')
+            path = os.path.join(self.dump_dir, f'periodic-epoch_{state.epoch}.pth.tar')
             FitState.save(path, state)
             self.logger.info(f'Saved snapshot: {path}')
 
 
 class FinalSnapshotter(Snapshotter):
     def __init__(self, dump_dir: str):
-        self.logger = logging.getLogger(f'{__name__}.CompletedSnapshotter')
+        self.logger = logging.getLogger(f'{__name__}.FinalSnapshotter')
 
         self.dump_dir = dump_dir
         pathlib.Path(dump_dir).mkdir(parents=True, exist_ok=True)
@@ -150,6 +150,6 @@ class FinalSnapshotter(Snapshotter):
 
     def epoch_completed(self, state: FitState):
         if state.epoch == state.num_epochs:
-            path = os.path.join(self.dump_dir, f'final.pth.tar')
+            path = os.path.join(self.dump_dir, f'final-epoch_{state.epoch}.pth.tar')
             FitState.save(path, state)
             self.logger.info(f'Saved snapshot: {path}')
