@@ -63,7 +63,7 @@ class Snapshotter(ABC):
 
         self.dump_dir = dump_dir
         pathlib.Path(dump_dir).mkdir(parents=True, exist_ok=True)
-        self.logger.info(f'Initialized snapshot dir: {dump_dir}')
+        self.logger.debug(f'Initialized snapshot dir: {dump_dir}')
 
     @abstractmethod
     def epoch_completed(self, state: FitState):
@@ -76,7 +76,7 @@ class Snapshotter(ABC):
     def save_snapshot(self, filename: str, state: FitState):
         path = os.path.join(self.dump_dir, filename)
         FitState.save(path, state)
-        self.logger.info(f'Saved snapshot: {path}')
+        self.logger.debug(f'Saved snapshot: {path}')
 
     def load_snapshot(self, filename: str) -> FitState:
         path = os.path.join(self.dump_dir, filename)
@@ -87,22 +87,21 @@ class Snapshotter(ABC):
     def drop_snapshot(self, filename: str):
         path = os.path.join(self.dump_dir, filename)
         os.remove(path)
-        self.logger.info(f'Dropped snapshot: {path}')
+        self.logger.debug(f'Dropped snapshot: {path}')
 
     def _list_snapshots(self, pattern: re.Pattern):
-        entries = [entry for entry in os.listdir(self.dump_dir) if os.path.isfile(entry)]
-
         data = []
-        for entry in entries:
-            m = pattern.match(entry)
-            if m is not None:
-                row = m.groupdict()
-                assert 'filename' not in row
+        for entry in os.listdir(self.dump_dir):
+            if os.path.isfile(os.path.join(self.dump_dir, entry)):
+                m = pattern.match(entry)
+                if m is not None:
+                    row = m.groupdict()
+                    assert 'filename' not in row
 
-                row['filename'] = entry
-                data.append(row)
+                    row['filename'] = entry
+                    data.append(row)
 
-        columns = list(pattern.groupindex.keys())
+        columns = list(pattern.groupindex.keys()) + ['filename']
         return pd.DataFrame(data, columns=columns)
 
 
@@ -148,7 +147,7 @@ class BestCVSnapshotter(Snapshotter):
             self.save_snapshot(filename, state)
 
     def list_snapshots(self) -> pd.DataFrame:
-        return self._list_snapshots(self.pattern)
+        return self._list_snapshots(self.pattern).sort_values(by='metric', ascending=self.ascending)
 
 
 class CheckpointSnapshotter(Snapshotter):
@@ -174,7 +173,7 @@ class CheckpointSnapshotter(Snapshotter):
             self.last_filename = filename
 
     def list_snapshots(self) -> pd.DataFrame:
-        return self._list_snapshots(self.pattern)
+        return self._list_snapshots(self.pattern).sort_values(by='epoch', ascending=False)
 
 
 class PeriodicSnapshotter(Snapshotter):
@@ -193,7 +192,7 @@ class PeriodicSnapshotter(Snapshotter):
             self.save_snapshot(filename, state)
 
     def list_snapshots(self) -> pd.DataFrame:
-        return self._list_snapshots(self.pattern)
+        return self._list_snapshots(self.pattern).sort_values(by='epoch', ascending=False)
 
 
 class FinalSnapshotter(Snapshotter):
@@ -209,4 +208,4 @@ class FinalSnapshotter(Snapshotter):
             self.save_snapshot(filename, state)
 
     def list_snapshots(self) -> pd.DataFrame:
-        return self._list_snapshots(self.pattern)
+        return self._list_snapshots(self.pattern).sort_values(by='epoch', ascending=False)
