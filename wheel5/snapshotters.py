@@ -157,55 +157,19 @@ class CheckpointSnapshotter(Snapshotter):
 
         self.frequency = frequency
 
-        self.prefix = f'checkpoint'
-        self.pattern = re.compile(r'^' + self.prefix + r'-epoch_(?P<epoch>\d+)\.pth\.tar$')
-
+        self.pattern = re.compile(r'^(?P<kind>checkpoint|final)-epoch_(?P<epoch>\d+)\.pth\.tar$')
         self.last_filename = None
 
     def epoch_completed(self, state: FitState):
         if ((state.epoch - 1) % self.frequency == 0) or (state.epoch == state.num_epochs):
-            filename = f'{self.prefix}-epoch_{state.epoch}.pth.tar'
+            kind = 'final' if state.epoch == state.num_epochs else 'checkpoint'
+            filename = f'{kind}-epoch_{state.epoch}.pth.tar'
             self.save_snapshot(filename, state)
 
             if self.last_filename:
                 self.drop_snapshot(self.last_filename)
 
             self.last_filename = filename
-
-    def list_snapshots(self) -> pd.DataFrame:
-        return self._list_snapshots(self.pattern).sort_values(by='epoch', ascending=False)
-
-
-class PeriodicSnapshotter(Snapshotter):
-    def __init__(self, dump_dir: str, frequency: int = 10):
-        super().__init__(dump_dir)
-        assert frequency >= 1
-
-        self.frequency = frequency
-
-        self.prefix = f'periodic'
-        self.pattern = re.compile(r'^' + self.prefix + r'-epoch_(?P<epoch>\d+)\.pth\.tar$')
-
-    def epoch_completed(self, state: FitState):
-        if (state.epoch - 1) % self.frequency == 0:
-            filename = f'{self.prefix}-epoch_{state.epoch}.pth.tar'
-            self.save_snapshot(filename, state)
-
-    def list_snapshots(self) -> pd.DataFrame:
-        return self._list_snapshots(self.pattern).sort_values(by='epoch', ascending=False)
-
-
-class FinalSnapshotter(Snapshotter):
-    def __init__(self, dump_dir: str):
-        super().__init__(dump_dir)
-
-        self.prefix = f'final'
-        self.pattern = re.compile(r'^' + self.prefix + r'-epoch_(?P<epoch>\d+)\.pth\.tar$')
-
-    def epoch_completed(self, state: FitState):
-        if state.epoch == state.num_epochs:
-            filename = f'{self.prefix}-epoch_{state.epoch}.pth.tar'
-            self.save_snapshot(filename, state)
 
     def list_snapshots(self) -> pd.DataFrame:
         return self._list_snapshots(self.pattern).sort_values(by='epoch', ascending=False)
