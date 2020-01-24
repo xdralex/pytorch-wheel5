@@ -28,6 +28,12 @@ class Organizer(object):
         self.experiment = experiment
         self.trials = {}
 
+    def snapshot_experiment(self):
+        return os.path.join(self.snapshot_root, self.experiment)
+
+    def tensorboard_experiment(self):
+        return os.path.join(self.tensorboard_root, self.experiment)
+
     def new_trial(self, key: Optional[str] = None, hparams: Optional[Dict[str, Union[int, float]]] = None):
         if key is not None and hparams is not None:
             raise AssertionError('Can\'t specify both key and hparams')

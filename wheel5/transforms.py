@@ -6,7 +6,7 @@ from torchvision.transforms import functional as F
 
 
 class SquarePaddedResize(object):
-    def __init__(self, size: Tuple[int, int], fill: Union[Number, str, tuple] = 0, interpolation: int = Image.BILINEAR):
+    def __init__(self, size: Union[Tuple[int, int], int], fill: Union[Number, str, tuple] = 0, interpolation: int = Image.BILINEAR):
         self.size = size
         self.fill = fill
         self.interpolation = interpolation
