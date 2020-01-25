@@ -1,4 +1,5 @@
 import datetime
+import json
 import logging
 import os
 import pathlib
@@ -62,20 +63,25 @@ class FitState(object):
 
 
 class Tracker(object):
-    def __init__(self, dump_dir: str,
+    def __init__(self, dump_dir: str, hparams: Optional[Dict[str, float]] = None,
                  snapshotter: Optional[Union['Snapshotter', List['Snapshotter']]] = None,
                  tb_writer: Optional[SummaryWriter] = None):
         self.logger = logging.getLogger(f'{__name__}.{self.__class__.__name__}')
 
         self.tb_writer = tb_writer
         self.snapshotters = as_list(snapshotter)
-        
-        self.metrics_list = []
-        self.metrics_df = pd.DataFrame()
 
         self.dump_dir = dump_dir
         pathlib.Path(dump_dir).mkdir(parents=True, exist_ok=True)
         self.logger.debug(f'Initialized tracking dir: {dump_dir}')
+
+        self.metrics_list = []
+        self.metrics_df = pd.DataFrame()
+
+        # Hyperparameters
+        with open(os.path.join(self.dump_dir, 'hyperparameters.json'), 'x') as f:
+            hparams = hparams or {}
+            json.dump(hparams, f, indent=2)
 
     def epoch_completed(self, state: FitState):
         # TensorBoard
@@ -104,13 +110,17 @@ class Tracker(object):
         self.metrics_list.append(metrics)
         self.metrics_df = pd.DataFrame(self.metrics_list)
 
-        metrics_df_path = os.path.join(self.dump_dir, 'metrics.csv')
-        self.metrics_df.to_csv(path_or_buf=metrics_df_path,
+        self.metrics_df.to_csv(path_or_buf=os.path.join(self.dump_dir, 'metrics.csv'),
                                sep=',',
                                date_format='%Y-%m-%d_%H:%M:%S.%f',
                                header=True,
                                index=False,
                                mode='w')
+
+        # Completion flag
+        if state.epoch == state.num_epochs:
+            with open(os.path.join(self.dump_dir, '.completed'), mode='x'):
+                pass
 
 
 class Snapshotter(ABC):
