@@ -99,8 +99,9 @@ class Tracker(object):
             snapshotter.epoch_completed(state)
 
         # Metrics
+        time = datetime.datetime.now()
         metrics = {
-            'time': datetime.datetime.now(),
+            'time': time,
             'epoch': state.epoch,
             'num_epochs': state.num_epochs
         }
@@ -119,8 +120,8 @@ class Tracker(object):
 
         # Completion flag
         if state.epoch == state.num_epochs:
-            with open(os.path.join(self.dump_dir, '.completed'), mode='x'):
-                pass
+            with open(os.path.join(self.dump_dir, '.completed'), mode='x') as f:
+                f.write(f'{time:%Y-%m-%d_%H:%M:%S.%f}\n')
 
 
 class Snapshotter(ABC):
@@ -173,17 +174,17 @@ class Snapshotter(ABC):
 
 
 class BestCVSnapshotter(Snapshotter):
-    def __init__(self, dump_dir: str, metric_name: str, asc: bool, best: int = 1):
+    def __init__(self, dump_dir: str, metric_name: str, asc: bool, top: int = 1):
         super().__init__(dump_dir)
-        assert best >= 1
+        assert top >= 1
 
         self.metric_name = metric_name
         self.ascending = asc
-        self.best = best
+        self.top = top
 
         metric_name_pfx = re.sub(r'[^0-9a-zA-Z]+', '', self.metric_name)
         asc_pfx = 'asc' if asc else 'desc'
-        self.prefix = f'bestcv-{metric_name_pfx}_{asc_pfx}'
+        self.prefix = f'bestcv-{metric_name_pfx}_{asc_pfx}-top_{top}'
         self.pattern = re.compile(r'^' + self.prefix + r'-epoch_(?P<epoch>\d+)-(?P<metric>[-+]?[0-9]*\.?[0-9]+)\.pth\.tar$')
 
         self.leaderboard = self.list_snapshots()
@@ -203,8 +204,8 @@ class BestCVSnapshotter(Snapshotter):
         leaderboard_dump = tabulate(self.leaderboard, headers="keys", showindex=False, tablefmt='github')
         self.logger.debug(f'Epoch completed => leaderboard: \n{leaderboard_dump}')
 
-        dropouts = self.leaderboard[self.best:]
-        self.leaderboard = self.leaderboard[:self.best]
+        dropouts = self.leaderboard[self.top:]
+        self.leaderboard = self.leaderboard[:self.top]
 
         if (self.leaderboard['filename'] == filename).any():
             self.save_snapshot(filename, state)
@@ -223,14 +224,15 @@ class CheckpointSnapshotter(Snapshotter):
         assert frequency >= 1
 
         self.frequency = frequency
+        self.prefix = f'freq_{frequency}'
 
-        self.pattern = re.compile(r'^(?P<kind>checkpoint|final)-epoch_(?P<epoch>\d+)\.pth\.tar$')
+        self.pattern = re.compile(r'^(?P<kind>checkpoint|final)-' + self.prefix + r'-epoch_(?P<epoch>\d+)\.pth\.tar$')
         self.last_filename = None
 
     def epoch_completed(self, state: FitState):
         if ((state.epoch - 1) % self.frequency == 0) or (state.epoch == state.num_epochs):
             kind = 'final' if state.epoch == state.num_epochs else 'checkpoint'
-            filename = f'{kind}-epoch_{state.epoch}.pth.tar'
+            filename = f'{kind}-{self.prefix}-epoch_{state.epoch}.pth.tar'
             self.save_snapshot(filename, state)
 
             if self.last_filename:
