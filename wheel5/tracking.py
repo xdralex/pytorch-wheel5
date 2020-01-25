@@ -1,15 +1,19 @@
+import datetime
 import logging
 import os
 import pathlib
 import re
 from abc import ABC, abstractmethod
-from typing import Dict, Union
+from typing import Dict, Union, Optional, List
 
 import pandas as pd
 import torch
 from tabulate import tabulate
 from torch.nn import Module
 from torch.optim.optimizer import Optimizer
+from torch.utils.tensorboard import SummaryWriter
+
+from .util import as_list
 
 
 # TODO: use state_dict() to serialize model/optimizer
@@ -57,10 +61,63 @@ class FitState(object):
         )
 
 
+class Tracker(object):
+    def __init__(self, dump_dir: str,
+                 snapshotter: Optional[Union['Snapshotter', List['Snapshotter']]] = None,
+                 tb_writer: Optional[SummaryWriter] = None):
+        self.logger = logging.getLogger(f'{__name__}.{self.__class__.__name__}')
+
+        self.tb_writer = tb_writer
+        self.snapshotters = as_list(snapshotter)
+        
+        self.metrics_list = []
+        self.metrics_df = pd.DataFrame()
+
+        self.dump_dir = dump_dir
+        pathlib.Path(dump_dir).mkdir(parents=True, exist_ok=True)
+        self.logger.debug(f'Initialized tracking dir: {dump_dir}')
+
+    def epoch_completed(self, state: FitState):
+        # TensorBoard
+        if self.tb_writer:
+            for k, v in state.train_metrics.items():
+                self.tb_writer.add_scalar(f'fit/train/{k}', v, state.epoch)
+
+            for k, v in state.val_metrics.items():
+                self.tb_writer.add_scalar(f'fit/val/{k}', v, state.epoch)
+
+            self.tb_writer.flush()
+
+        # Snapshots
+        for snapshotter in self.snapshotters:
+            snapshotter.epoch_completed(state)
+
+        # Metrics
+        metrics = {
+            'time': datetime.datetime.now(),
+            'epoch': state.epoch,
+            'num_epochs': state.num_epochs
+        }
+        metrics.update({f'train_{k}': v for k, v in state.train_metrics.items()})
+        metrics.update({f'val_{k}': v for k, v in state.val_metrics.items()})
+
+        self.metrics_list.append(metrics)
+        self.metrics_df = pd.DataFrame(self.metrics_list)
+
+        metrics_df_path = os.path.join(self.dump_dir, 'metrics.csv')
+        self.metrics_df.to_csv(path_or_buf=metrics_df_path,
+                               sep=',',
+                               date_format='%Y-%m-%d_%H:%M:%S.%f',
+                               header=True,
+                               index=False,
+                               mode='w')
+
+
 class Snapshotter(ABC):
     def __init__(self, dump_dir: str):
         self.logger = logging.getLogger(f'{__name__}.{self.__class__.__name__}')
 
+        # FIXME: refactor dump_dir usage in tracking
         self.dump_dir = dump_dir
         pathlib.Path(dump_dir).mkdir(parents=True, exist_ok=True)
         self.logger.debug(f'Initialized snapshot dir: {dump_dir}')
@@ -139,12 +196,12 @@ class BestCVSnapshotter(Snapshotter):
         dropouts = self.leaderboard[self.best:]
         self.leaderboard = self.leaderboard[:self.best]
 
+        if (self.leaderboard['filename'] == filename).any():
+            self.save_snapshot(filename, state)
+
         for row in dropouts.itertuples():
             if row.filename != filename:
                 self.drop_snapshot(row.filename)
-
-        if (self.leaderboard['filename'] == filename).any():
-            self.save_snapshot(filename, state)
 
     def list_snapshots(self) -> pd.DataFrame:
         return self._list_snapshots(self.pattern).sort_values(by='metric', ascending=self.ascending)

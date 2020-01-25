@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 from . import cuda
 from .metrics import AverageMeter, AccuracyMeter, ArrayAccumMeter
-from .snapshotters import Snapshotter, FitState
+from .tracking import Tracker, FitState
 
 
 class EpochHandler(ABC):
@@ -139,52 +139,25 @@ def fit(device: Union[torch.device, int],
         loss: Module,
         optimizer: Optimizer,
         num_epochs: int,
-        snapshotter: Optional[Union[Snapshotter, List[Snapshotter]]] = None,
-        tb_writer: Optional[SummaryWriter] = None,
-        display_progress: bool = True) -> DataFrame:
-
-    if snapshotter is None:
-        snapshotter = []
-    elif not isinstance(snapshotter, collections.Iterable):
-        snapshotter = [snapshotter]
-
+        tracker: Optional[Tracker] = None,
+        display_progress: bool = True):
     train_handler = TrainEvalEpochHandler('train', num_epochs)
     val_handler = TrainEvalEpochHandler('val', num_epochs)
-
-    metrics_list = []
 
     for epoch in range(1, num_epochs + 1):
         train_metrics = run_epoch(device, model, train_loader, loss, optimizer, train_handler, display_progress=display_progress)
         val_metrics = run_epoch(device, model, val_loader, loss, None, val_handler, display_progress=display_progress)
 
-        assert set(train_metrics.keys()) == set(val_metrics.keys())
-        assert 'epoch' not in train_metrics
+        if tracker:
+            state = FitState(model=model,
+                             loss=loss,
+                             optimizer=optimizer,
+                             epoch=epoch,
+                             num_epochs=num_epochs,
+                             train_metrics=train_metrics,
+                             val_metrics=val_metrics)
 
-        metrics = {'epoch': epoch}
-        for key in train_metrics.keys():
-            tb_writer.add_scalar(f'fit/train/{key}', train_metrics[key], epoch)
-            tb_writer.add_scalar(f'fit/val/{key}', val_metrics[key], epoch)
-
-            metrics[f'train_{key}'] = train_metrics[key]
-            metrics[f'val_{key}'] = val_metrics[key]
-
-        tb_writer.flush()
-        metrics_list.append(metrics)
-
-        state = FitState(
-            model=model,
-            loss=loss,
-            optimizer=optimizer,
-            epoch=epoch,
-            num_epochs=num_epochs,
-            train_metrics=train_metrics,
-            val_metrics=val_metrics
-        )
-
-        for entry in snapshotter:
-            entry.epoch_completed(state)
-
-    return DataFrame(metrics_list)
+            tracker.epoch_completed(state)
 
 
 def score(device: Union[torch.device, int],
@@ -192,7 +165,6 @@ def score(device: Union[torch.device, int],
           loader: DataLoader,
           loss: Module,
           display_progress: bool = True) -> Dict[str, Union[int, float]]:
-
     handler = TrainEvalEpochHandler('score', num_epochs=1)
     return run_epoch(device, model, loader, loss, None, handler, display_progress=display_progress)
 
@@ -201,7 +173,6 @@ def predict(device: Union[torch.device, int],
             model: Module,
             loader: DataLoader,
             display_progress: bool = True) -> Dict[str, np.ndarray]:
-
     handler = PredictEpochHandler()
     return run_epoch(device, model, loader, None, None, handler, display_progress=display_progress)
 
@@ -213,7 +184,6 @@ def run_epoch(device: Union[torch.device, int],
               optimizer: Optional[Optimizer],
               handler: EpochHandler,
               display_progress: bool = True):
-
     logger = logging.getLogger(f'{__name__}.run_epoch')
 
     def log_memory_usage(context: str):
