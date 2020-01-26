@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 from . import cuda
 from .metrics import AverageMeter, AccuracyMeter, ArrayAccumMeter
-from .tracking import Tracker, FitState
+from .tracking import TrialTracker, FitState
 
 
 class EpochHandler(ABC):
@@ -139,7 +139,7 @@ def fit(device: Union[torch.device, int],
         loss: Module,
         optimizer: Optimizer,
         num_epochs: int,
-        tracker: Optional[Tracker] = None,
+        tracker: Optional[TrialTracker] = None,
         display_progress: bool = True):
     train_handler = TrainEvalEpochHandler('train', num_epochs)
     val_handler = TrainEvalEpochHandler('val', num_epochs)
@@ -186,7 +186,7 @@ def run_epoch(device: Union[torch.device, int],
               display_progress: bool = True):
     logger = logging.getLogger(f'{__name__}.run_epoch')
 
-    def log_memory_usage(context: str):
+    def log_status(context: str):
         if logger.getEffectiveLevel() == logging.DEBUG:
             stats = cuda.memory_stats(device)
             logger.debug(f'{context} - [{device}] alloc/cache = {stats["allocated"]:.0f} MB / {stats["cached"]:.0f} MB')
@@ -197,24 +197,24 @@ def run_epoch(device: Union[torch.device, int],
     model.train(train_mode)
     with torch.autograd.set_grad_enabled(train_mode):
         with tqdm(total=batches_count, disable=not display_progress) as progress_bar:
-            log_memory_usage('started epoch')
+            log_status('started epoch')
 
             handler.epoch_started()
             progress_bar.set_description(handler.state_repr())
 
             for i, (x, y, _, indices) in enumerate(loader):
-                log_memory_usage('  started batch')
+                log_status('  started batch')
 
                 x_gpu = x.to(device)
                 y_gpu = y.to(device)
-                log_memory_usage('    loaded batch')
+                log_status('    loaded batch')
 
                 y_probs = model(x_gpu)
                 y_hat = torch.argmax(y_probs, 1)
-                log_memory_usage('    performed forward pass')
+                log_status('    performed forward pass')
 
                 loss_value = None if loss is None else loss(y_probs, y_gpu)
-                log_memory_usage('    computed loss value')
+                log_status('    computed loss value')
 
                 if optimizer is not None:
                     if loss_value is None:
@@ -222,20 +222,20 @@ def run_epoch(device: Union[torch.device, int],
 
                     optimizer.zero_grad()
                     loss_value.backward()
-                    log_memory_usage('    performed backward pass')
+                    log_status('    performed backward pass')
 
                     optimizer.step()
-                    log_memory_usage('    stepped optimizer')
+                    log_status('    stepped optimizer')
 
                 handler.batch_processed(x_gpu, y_gpu, y_probs, y_hat, loss_value, indices)
                 progress_bar.update()
                 progress_bar.set_description(handler.state_repr())
 
-                log_memory_usage('    finished batch')
+                log_status('    finished batch')
 
             metrics = handler.epoch_finished()
             progress_bar.set_description(handler.state_repr())
 
-            log_memory_usage('finished epoch')
+            log_status('finished epoch')
 
             return metrics

@@ -1,6 +1,7 @@
 import datetime
 import json
 import logging
+import math
 import os
 import pathlib
 import re
@@ -63,43 +64,96 @@ class FitState(object):
 
 
 class Tracker(object):
-    def __init__(self, dump_dir: str, hparams: Optional[Dict[str, float]] = None,
-                 snapshotter: Optional[Union['Snapshotter', List['Snapshotter']]] = None,
-                 tb_writer: Optional[SummaryWriter] = None):
-        self.logger = logging.getLogger(f'{__name__}.{self.__class__.__name__}')
-
-        self.tb_writer = tb_writer
+    def __init__(self, snapshot_root: str, tensorboard_root: str, snapshotter: Optional[Union['Snapshotter', List['Snapshotter']]] = None):
+        self.snapshot_root = snapshot_root
+        self.tensorboard_root = tensorboard_root
         self.snapshotters = as_list(snapshotter)
 
-        self.dump_dir = dump_dir
-        pathlib.Path(dump_dir).mkdir(parents=True, exist_ok=True)
-        self.logger.debug(f'Initialized tracking dir: {dump_dir}')
+    def new_experiment(self, experiment: str) -> 'ExperimentTracker':
+        return ExperimentTracker(self, experiment)
+
+
+class ExperimentTracker(object):
+    def __init__(self, tracker: Tracker, experiment: str):
+        self.tracker = tracker
+        self.experiment = experiment
+
+        self.trials = {}
+
+    @property
+    def snapshot_dir(self) -> str:
+        return os.path.join(self.tracker.snapshot_root, self.experiment)
+
+    @property
+    def tensorboard_dir(self) -> str:
+        return os.path.join(self.tracker.tensorboard_root, self.experiment)
+
+    def new_trial(self, hparams: Optional[Dict[str, float]] = None) -> 'TrialTracker':
+        if hparams is None:
+            trial = f'{datetime.datetime.now():%Y-%m-%d_%H:%M:%S}'
+        else:
+            trial = ExperimentTracker.dict_to_key(hparams)
+
+        counter = self.trials.setdefault(trial, 0)
+        self.trials[trial] += 1
+        if counter > 0:
+            trial = f'{trial}_{counter}'
+
+        return TrialTracker(self.tracker, self.experiment, trial, hparams)
+
+    @staticmethod
+    def dict_to_key(hparams: Dict[str, float]) -> str:
+        def format_float(v: float) -> str:
+            zeros = math.ceil(math.log10(v))
+            if zeros < 5:
+                return f'{v:.{5 - zeros}f}'
+            else:
+                return f'{v:.1f}'
+
+        return '-'.join([f'{k}_{format_float(v)}' for k, v in hparams.items()])
+
+
+class TrialTracker(object):
+    def __init__(self, tracker: Tracker, experiment: str, trial: str, hparams: Optional[Dict[str, float]]):
+        self.logger = logging.getLogger(f'{__name__}.{self.__class__.__name__}')
+
+        self.tracker = tracker
+        self.experiment = experiment
+        self.trial = trial
+        self.hparams = hparams
+
+        self.tensorboard_dir = os.path.join(tracker.tensorboard_root, experiment, trial)
+        pathlib.Path(self.tensorboard_dir).mkdir(parents=True, exist_ok=True)
+        self.tb_writer = SummaryWriter(self.tensorboard_dir, max_queue=128, flush_secs=60)
+        self.logger.debug(f'Initialized TensorBoard event storage: {self.tensorboard_dir}')
+
+        self.snapshot_dir = os.path.join(tracker.snapshot_root, experiment, trial)
+        pathlib.Path(self.snapshot_dir).mkdir(parents=True, exist_ok=True)
+        self.logger.debug(f'Initialized snapshot storage: {self.snapshot_dir}')
 
         self.metrics_list = []
         self.metrics_df = pd.DataFrame()
 
         # Hyperparameters
-        with open(os.path.join(self.dump_dir, 'hyperparameters.json'), 'x') as f:
+        with open(os.path.join(self.snapshot_dir, 'hyperparameters.json'), 'x') as f:
             hparams = hparams or {}
             json.dump(hparams, f, indent=2)
 
     def epoch_completed(self, state: FitState):
+        time = datetime.datetime.now()
+
         # TensorBoard
-        if self.tb_writer:
-            for k, v in state.train_metrics.items():
-                self.tb_writer.add_scalar(f'fit/train/{k}', v, state.epoch)
-
-            for k, v in state.val_metrics.items():
-                self.tb_writer.add_scalar(f'fit/val/{k}', v, state.epoch)
-
-            self.tb_writer.flush()
+        for k, v in state.train_metrics.items():
+            self.tb_writer.add_scalar(f'fit/train/{k}', v, state.epoch)
+        for k, v in state.val_metrics.items():
+            self.tb_writer.add_scalar(f'fit/val/{k}', v, state.epoch)
+        self.tb_writer.flush()
 
         # Snapshots
-        for snapshotter in self.snapshotters:
-            snapshotter.epoch_completed(state)
+        for snapshotter in self.tracker.snapshotters:
+            snapshotter.epoch_completed(self.snapshot_dir, state)
 
         # Metrics
-        time = datetime.datetime.now()
         metrics = {
             'time': time,
             'epoch': state.epoch,
@@ -110,8 +164,7 @@ class Tracker(object):
 
         self.metrics_list.append(metrics)
         self.metrics_df = pd.DataFrame(self.metrics_list)
-
-        self.metrics_df.to_csv(path_or_buf=os.path.join(self.dump_dir, 'metrics.csv'),
+        self.metrics_df.to_csv(path_or_buf=os.path.join(self.snapshot_dir, 'metrics.csv'),
                                sep=',',
                                date_format='%Y-%m-%d_%H:%M:%S.%f',
                                header=True,
@@ -120,47 +173,31 @@ class Tracker(object):
 
         # Completion flag
         if state.epoch == state.num_epochs:
-            with open(os.path.join(self.dump_dir, '.completed'), mode='x') as f:
+            with open(os.path.join(self.snapshot_dir, '.completed'), mode='x') as f:
                 f.write(f'{time:%Y-%m-%d_%H:%M:%S.%f}\n')
+
+    def trial_completed(self, results: Dict[str, float]):
+        self.tb_writer.add_hparams(self.hparams, results)
+        self.tb_writer.flush()
 
 
 class Snapshotter(ABC):
-    def __init__(self, dump_dir: str):
+    def __init__(self):
         self.logger = logging.getLogger(f'{__name__}.{self.__class__.__name__}')
 
-        # FIXME: refactor dump_dir usage in tracking
-        self.dump_dir = dump_dir
-        pathlib.Path(dump_dir).mkdir(parents=True, exist_ok=True)
-        self.logger.debug(f'Initialized snapshot dir: {dump_dir}')
-
     @abstractmethod
-    def epoch_completed(self, state: FitState):
+    def epoch_completed(self, directory: str, state: FitState):
         pass
 
     @abstractmethod
-    def list_snapshots(self) -> pd.DataFrame:
+    def list_snapshots(self, directory: str) -> pd.DataFrame:
         pass
 
-    def save_snapshot(self, filename: str, state: FitState):
-        path = os.path.join(self.dump_dir, filename)
-        FitState.save(path, state)
-        self.logger.debug(f'Saved snapshot: {path}')
-
-    def load_snapshot(self, filename: str) -> FitState:
-        path = os.path.join(self.dump_dir, filename)
-        state = FitState.load(path)
-        self.logger.debug(f'Loaded snapshot: {path}')
-        return state
-
-    def drop_snapshot(self, filename: str):
-        path = os.path.join(self.dump_dir, filename)
-        os.remove(path)
-        self.logger.debug(f'Dropped snapshot: {path}')
-
-    def _list_snapshots(self, pattern: re.Pattern):
+    @staticmethod
+    def _list_snapshots(directory: str, pattern: re.Pattern) -> pd.DataFrame:
         data = []
-        for entry in os.listdir(self.dump_dir):
-            if os.path.isfile(os.path.join(self.dump_dir, entry)):
+        for entry in os.listdir(directory):
+            if os.path.isfile(os.path.join(directory, entry)):
                 m = pattern.match(entry)
                 if m is not None:
                     row = m.groupdict()
@@ -173,27 +210,52 @@ class Snapshotter(ABC):
         columns = list(pattern.groupindex.keys()) + ['filename']
         return pd.DataFrame(data, columns=columns)
 
+    @staticmethod
+    def save_snapshot(directory: str, filename: str, state: FitState):
+        logger = logging.getLogger(f'{__name__}.snapshotter')
+
+        path = os.path.join(directory, filename)
+        FitState.save(path, state)
+        logger.debug(f'Saved snapshot: {path}')
+
+    @staticmethod
+    def load_snapshot(directory: str, filename: str) -> FitState:
+        logger = logging.getLogger(f'{__name__}.snapshotter')
+
+        path = os.path.join(directory, filename)
+        state = FitState.load(path)
+        logger.debug(f'Loaded snapshot: {path}')
+
+        return state
+
+    @staticmethod
+    def drop_snapshot(directory: str, filename: str):
+        logger = logging.getLogger(f'{__name__}.snapshotter')
+
+        path = os.path.join(directory, filename)
+        os.remove(path)
+        logger.debug(f'Dropped snapshot: {path}')
+
 
 class BestCVSnapshotter(Snapshotter):
-    def __init__(self, dump_dir: str, metric_name: str, asc: bool, top: int = 1):
-        super().__init__(dump_dir)
+    def __init__(self, metric_name: str, asc: bool, top: int = 1):
+        super().__init__()
         assert top >= 1
 
         self.metric_name = metric_name
         self.ascending = asc
         self.top = top
 
-        metric_name_pfx = re.sub(r'[^0-9a-zA-Z]+', '', self.metric_name)
-        asc_pfx = 'asc' if asc else 'desc'
-        self.prefix = f'bestcv-{metric_name_pfx}_{asc_pfx}-top_{top}'
+        asc_str = 'asc' if asc else 'desc'
+        self.prefix = f'bestcv-{metric_name}_{asc_str}-top_{top}'
         self.pattern = re.compile(r'^' + self.prefix + r'-epoch_(?P<epoch>\d+)-(?P<metric>[-+]?[0-9]*\.?[0-9]+)\.pth\.tar$')
 
-    def epoch_completed(self, state: FitState):
+    def epoch_completed(self, directory: str, state: FitState):
         epoch = int(state.epoch)
         metric = float(state.val_metrics[self.metric_name])
         filename = f'{self.prefix}-epoch_{epoch}-{metric:.8f}.pth.tar'
 
-        leaderboard = self.list_snapshots()
+        leaderboard = self.list_snapshots(directory)
         leaderboard['new'] = ''
         leaderboard = leaderboard.append({'epoch': epoch, 'metric': metric, 'filename': filename, 'new': 'X'}, ignore_index=True)
         leaderboard = leaderboard.sort_values(by='metric', ascending=self.ascending)
@@ -205,22 +267,22 @@ class BestCVSnapshotter(Snapshotter):
         leaderboard = leaderboard[:self.top]
 
         if (leaderboard['filename'] == filename).any():
-            self.save_snapshot(filename, state)
+            self.save_snapshot(directory, filename, state)
 
         for row in dropouts.itertuples():
             if row.filename != filename:
-                self.drop_snapshot(row.filename)
+                self.drop_snapshot(directory, row.filename)
 
-    def list_snapshots(self) -> pd.DataFrame:
-        df = self._list_snapshots(self.pattern)
+    def list_snapshots(self, directory: str) -> pd.DataFrame:
+        df = self._list_snapshots(directory, self.pattern)
         df['epoch'] = df['epoch'].map(int)
         df['metric'] = df['metric'].map(float)
         return df
 
 
 class CheckpointSnapshotter(Snapshotter):
-    def __init__(self, dump_dir: str, frequency: int = 10):
-        super().__init__(dump_dir)
+    def __init__(self, frequency: int = 10):
+        super().__init__()
         assert frequency >= 1
 
         self.frequency = frequency
@@ -228,19 +290,19 @@ class CheckpointSnapshotter(Snapshotter):
         
         self.pattern = re.compile(r'^(?P<kind>checkpoint|final)-' + self.prefix + r'-epoch_(?P<epoch>\d+)\.pth\.tar$')
 
-    def epoch_completed(self, state: FitState):
+    def epoch_completed(self, directory: str, state: FitState):
         if ((state.epoch - 1) % self.frequency == 0) or (state.epoch == state.num_epochs):
-            history = self.list_snapshots()
+            history = self.list_snapshots(directory)
 
             kind = 'final' if state.epoch == state.num_epochs else 'checkpoint'
             filename = f'{kind}-{self.prefix}-epoch_{state.epoch}.pth.tar'
-            self.save_snapshot(filename, state)
+            self.save_snapshot(directory, filename, state)
 
             for row in history.itertuples():
                 if row.filename != filename:
-                    self.drop_snapshot(row.filename)
+                    self.drop_snapshot(directory, row.filename)
 
-    def list_snapshots(self) -> pd.DataFrame:
-        df = self._list_snapshots(self.pattern)
+    def list_snapshots(self, directory: str) -> pd.DataFrame:
+        df = self._list_snapshots(directory, self.pattern)
         df['epoch'] = df['epoch'].map(int)
         return df
