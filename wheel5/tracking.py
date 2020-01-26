@@ -164,9 +164,10 @@ class Snapshotter(ABC):
                 m = pattern.match(entry)
                 if m is not None:
                     row = m.groupdict()
-                    assert 'filename' not in row
 
+                    assert 'filename' not in row
                     row['filename'] = entry
+
                     data.append(row)
 
         columns = list(pattern.groupindex.keys()) + ['filename']
@@ -187,27 +188,23 @@ class BestCVSnapshotter(Snapshotter):
         self.prefix = f'bestcv-{metric_name_pfx}_{asc_pfx}-top_{top}'
         self.pattern = re.compile(r'^' + self.prefix + r'-epoch_(?P<epoch>\d+)-(?P<metric>[-+]?[0-9]*\.?[0-9]+)\.pth\.tar$')
 
-        self.leaderboard = self.list_snapshots()
-        self.leaderboard = self.leaderboard.sort_values(by='metric', ascending=self.ascending)
-
-        leaderboard_dump = tabulate(self.leaderboard, headers="keys", showindex=False, tablefmt='github')
-        self.logger.debug(f'Snapshotter initialized => leaderboard: \n{leaderboard_dump}')
-
     def epoch_completed(self, state: FitState):
         epoch = int(state.epoch)
         metric = float(state.val_metrics[self.metric_name])
         filename = f'{self.prefix}-epoch_{epoch}-{metric:.8f}.pth.tar'
 
-        self.leaderboard = self.leaderboard.append({'epoch': epoch, 'metric': metric, 'filename': filename}, ignore_index=True)
-        self.leaderboard = self.leaderboard.sort_values(by='metric', ascending=self.ascending)
+        leaderboard = self.list_snapshots()
+        leaderboard['new'] = ''
+        leaderboard = leaderboard.append({'epoch': epoch, 'metric': metric, 'filename': filename, 'new': 'X'}, ignore_index=True)
+        leaderboard = leaderboard.sort_values(by='metric', ascending=self.ascending)
 
-        leaderboard_dump = tabulate(self.leaderboard, headers="keys", showindex=False, tablefmt='github')
+        leaderboard_dump = tabulate(leaderboard, headers="keys", showindex=False, tablefmt='github')
         self.logger.debug(f'Epoch completed => leaderboard: \n{leaderboard_dump}')
 
-        dropouts = self.leaderboard[self.top:]
-        self.leaderboard = self.leaderboard[:self.top]
+        dropouts = leaderboard[self.top:]
+        leaderboard = leaderboard[:self.top]
 
-        if (self.leaderboard['filename'] == filename).any():
+        if (leaderboard['filename'] == filename).any():
             self.save_snapshot(filename, state)
 
         for row in dropouts.itertuples():
@@ -215,7 +212,10 @@ class BestCVSnapshotter(Snapshotter):
                 self.drop_snapshot(row.filename)
 
     def list_snapshots(self) -> pd.DataFrame:
-        return self._list_snapshots(self.pattern).sort_values(by='metric', ascending=self.ascending)
+        df = self._list_snapshots(self.pattern)
+        df['epoch'] = df['epoch'].map(int)
+        df['metric'] = df['metric'].map(float)
+        return df
 
 
 class CheckpointSnapshotter(Snapshotter):
@@ -225,20 +225,22 @@ class CheckpointSnapshotter(Snapshotter):
 
         self.frequency = frequency
         self.prefix = f'freq_{frequency}'
-
+        
         self.pattern = re.compile(r'^(?P<kind>checkpoint|final)-' + self.prefix + r'-epoch_(?P<epoch>\d+)\.pth\.tar$')
-        self.last_filename = None
 
     def epoch_completed(self, state: FitState):
         if ((state.epoch - 1) % self.frequency == 0) or (state.epoch == state.num_epochs):
+            history = self.list_snapshots()
+
             kind = 'final' if state.epoch == state.num_epochs else 'checkpoint'
             filename = f'{kind}-{self.prefix}-epoch_{state.epoch}.pth.tar'
             self.save_snapshot(filename, state)
 
-            if self.last_filename:
-                self.drop_snapshot(self.last_filename)
-
-            self.last_filename = filename
+            for row in history.itertuples():
+                if row.filename != filename:
+                    self.drop_snapshot(row.filename)
 
     def list_snapshots(self) -> pd.DataFrame:
-        return self._list_snapshots(self.pattern).sort_values(by='epoch', ascending=False)
+        df = self._list_snapshots(self.pattern)
+        df['epoch'] = df['epoch'].map(int)
+        return df
