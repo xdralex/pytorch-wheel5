@@ -6,7 +6,7 @@ import os
 import pathlib
 import re
 from abc import ABC, abstractmethod
-from typing import Dict, Union, Optional, List
+from typing import Dict, Union, Optional, List, NamedTuple
 
 import pandas as pd
 import torch
@@ -63,43 +63,43 @@ class FitState(object):
         )
 
 
+class SnapshotConfig(NamedTuple):
+    root_dir: str
+    snapshotters: List['Snapshotter']
+
+
+class TensorboardConfig(NamedTuple):
+    root_dir: str
+
+
 class Tracker(object):
-    def __init__(self, snapshot_root: str, tensorboard_root: str, snapshotter: Optional[Union['Snapshotter', List['Snapshotter']]] = None):
-        self.snapshot_root = snapshot_root
-        self.tensorboard_root = tensorboard_root
-        self.snapshotters = as_list(snapshotter)
-
-    def new_experiment(self, experiment: str) -> 'ExperimentTracker':
-        return ExperimentTracker(self, experiment)
-
-
-class ExperimentTracker(object):
-    def __init__(self, tracker: Tracker, experiment: str):
-        self.tracker = tracker
+    def __init__(self, snapshot_cfg: SnapshotConfig, tensorboard_cfg: TensorboardConfig, experiment: str):
+        self.snapshot_cfg = snapshot_cfg
+        self.tensorboard_cfg = tensorboard_cfg
         self.experiment = experiment
 
         self.trials = {}
 
     @property
     def snapshot_dir(self) -> str:
-        return os.path.join(self.tracker.snapshot_root, self.experiment)
+        return os.path.join(self.snapshot_cfg.root_dir, self.experiment)
 
     @property
     def tensorboard_dir(self) -> str:
-        return os.path.join(self.tracker.tensorboard_root, self.experiment)
+        return os.path.join(self.tensorboard_cfg.root_dir, self.experiment)
 
     def new_trial(self, hparams: Optional[Dict[str, float]] = None) -> 'TrialTracker':
         if hparams is None:
             trial = f'{datetime.datetime.now():%Y-%m-%d_%H:%M:%S}'
         else:
-            trial = ExperimentTracker.dict_to_key(hparams)
+            trial = Tracker.dict_to_key(hparams)
 
         counter = self.trials.setdefault(trial, 0)
         self.trials[trial] += 1
         if counter > 0:
             trial = f'{trial}_{counter}'
 
-        return TrialTracker(self.tracker, self.experiment, trial, hparams)
+        return TrialTracker(self.snapshot_cfg, self.tensorboard_cfg, self.experiment, trial, hparams)
 
     @staticmethod
     def dict_to_key(hparams: Dict[str, float]) -> str:
@@ -112,22 +112,41 @@ class ExperimentTracker(object):
 
         return '-'.join([f'{k}_{format_float(v)}' for k, v in hparams.items()])
 
+    @staticmethod
+    def load_stats(snapshot_cfg: SnapshotConfig, experiment: str) -> Optional[pd.DataFrame]:
+        experiment_df = None
+
+        directory = os.path.join(snapshot_cfg.root_dir, experiment)
+        for trial in os.listdir(directory):
+            if os.path.isdir(os.path.join(directory, trial)):
+                trial_df = TrialTracker.load_stats(snapshot_cfg, experiment, trial)
+
+                if trial_df is not None:
+                    if experiment_df is not None:
+                        experiment_df = experiment_df.append(trial_df, ignore_index=True)
+                    else:
+                        experiment_df = trial_df
+
+        return experiment_df
+
 
 class TrialTracker(object):
-    def __init__(self, tracker: Tracker, experiment: str, trial: str, hparams: Optional[Dict[str, float]]):
+    def __init__(self, snapshot_cfg: SnapshotConfig, tensorboard_cfg: TensorboardConfig, experiment: str, trial: str,
+                 hparams: Optional[Dict[str, float]]):
         self.logger = logging.getLogger(f'{__name__}.{self.__class__.__name__}')
 
-        self.tracker = tracker
+        self.snapshot_cfg = snapshot_cfg
+        self.tensorboard_cfg = tensorboard_cfg
         self.experiment = experiment
         self.trial = trial
-        self.hparams = hparams
+        self.hparams = hparams or {}
 
-        self.tensorboard_dir = os.path.join(tracker.tensorboard_root, experiment, trial)
+        self.tensorboard_dir = os.path.join(tensorboard_cfg.root_dir, experiment, trial)
         pathlib.Path(self.tensorboard_dir).mkdir(parents=True, exist_ok=True)
         self.tb_writer = SummaryWriter(self.tensorboard_dir, max_queue=128, flush_secs=60)
         self.logger.debug(f'Initialized TensorBoard event storage: {self.tensorboard_dir}')
 
-        self.snapshot_dir = os.path.join(tracker.snapshot_root, experiment, trial)
+        self.snapshot_dir = os.path.join(snapshot_cfg.root_dir, experiment, trial)
         pathlib.Path(self.snapshot_dir).mkdir(parents=True, exist_ok=True)
         self.logger.debug(f'Initialized snapshot storage: {self.snapshot_dir}')
 
@@ -136,12 +155,9 @@ class TrialTracker(object):
 
         # Hyperparameters
         with open(os.path.join(self.snapshot_dir, 'hyperparameters.json'), 'x') as f:
-            hparams = hparams or {}
             json.dump(hparams, f, indent=2)
 
     def epoch_completed(self, state: FitState):
-        time = datetime.datetime.now()
-
         # TensorBoard
         for k, v in state.train_metrics.items():
             self.tb_writer.add_scalar(f'fit/train/{k}', v, state.epoch)
@@ -150,12 +166,12 @@ class TrialTracker(object):
         self.tb_writer.flush()
 
         # Snapshots
-        for snapshotter in self.tracker.snapshotters:
+        for snapshotter in self.snapshot_cfg.snapshotters:
             snapshotter.epoch_completed(self.snapshot_dir, state)
 
         # Metrics
         metrics = {
-            'time': time,
+            'time': datetime.datetime.now(),
             'epoch': state.epoch,
             'num_epochs': state.num_epochs
         }
@@ -171,14 +187,47 @@ class TrialTracker(object):
                                index=False,
                                mode='w')
 
-        # Completion flag
-        if state.epoch == state.num_epochs:
-            with open(os.path.join(self.snapshot_dir, '.completed'), mode='x') as f:
-                f.write(f'{time:%Y-%m-%d_%H:%M:%S.%f}\n')
-
-    def trial_completed(self, results: Dict[str, float]):
+    def trial_completed(self, results: Optional[Dict[str, float]] = None):
+        results = results or {}
         self.tb_writer.add_hparams(self.hparams, results)
         self.tb_writer.flush()
+
+        with open(os.path.join(self.snapshot_dir, '.completed'), mode='x') as f:
+            f.write(f'{datetime.datetime.now():%Y-%m-%d_%H:%M:%S.%f}\n')
+
+    @staticmethod
+    def load_stats(snapshot_cfg: SnapshotConfig, experiment: str, trial: str) -> Optional[pd.DataFrame]:
+        directory = os.path.join(snapshot_cfg.root_dir, experiment, trial)
+        if not os.path.exists(os.path.join(directory, '.completed')):
+            return None
+
+        trial_df = pd.read_csv(filepath_or_buffer=os.path.join(directory, 'metrics.csv'), sep=',', header=0)
+
+        trial_df.insert(0, 'experiment', experiment)
+        trial_df.insert(1, 'trial', trial)
+
+        # Hyperparameters
+        with open(os.path.join(directory, 'hyperparameters.json'), 'r') as f:
+            hparams = json.load(f)
+
+        counter = 2
+        for k, v in hparams.items():
+            trial_df.insert(counter, k, float(v))
+            counter += 1
+
+        # Snapshots
+        trial_df['snapshot'] = ''
+        trial_df['directory'] = directory
+
+        snapshots = {}
+        for snapshotter in snapshot_cfg.snapshotters:
+            for row in snapshotter.list_snapshots(directory).itertuples():
+                snapshots.setdefault(row.epoch, row.filename)
+
+        for epoch, filename in snapshots.items():
+            trial_df.loc[trial_df['epoch'] == epoch, 'snapshot'] = filename
+
+        return trial_df
 
 
 class Snapshotter(ABC):
