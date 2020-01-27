@@ -15,8 +15,6 @@ from torch.nn import Module
 from torch.optim.optimizer import Optimizer
 from torch.utils.tensorboard import SummaryWriter
 
-from .util import as_list
-
 
 # TODO: use state_dict() to serialize model/optimizer
 class FitState(object):

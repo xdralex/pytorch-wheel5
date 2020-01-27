@@ -37,7 +37,7 @@ class EpochHandler(ABC):
 class TrainEvalEpochHandler(EpochHandler):
     def __init__(self, kind, num_epochs):
         self.loss_meter = AverageMeter()
-        self.accuracy_meter = AccuracyMeter()
+        self.acc_meter = AccuracyMeter()
 
         self.kind = kind
         self.epoch = 0
@@ -53,9 +53,9 @@ class TrainEvalEpochHandler(EpochHandler):
         self.in_epoch = True
 
         self.loss_meter.reset()
-        self.accuracy_meter.reset()
+        self.acc_meter.reset()
 
-        self._state_repr = f'{self._prefix()} - loss=?, accuracy=?'
+        self._state_repr = f'{self._prefix()} - loss=?, acc=?'
 
     def batch_processed(self, x: Tensor, y: Tensor, y_probs: Tensor, y_hat: Tensor, loss_value: Tensor, indices: Tensor):
         assert 0 < self.epoch <= self.num_epochs
@@ -65,9 +65,9 @@ class TrainEvalEpochHandler(EpochHandler):
         batch_total = float(y.shape[0])
 
         batch_loss = self.loss_meter.add(float(loss_value))
-        batch_accuracy = self.accuracy_meter.add(batch_correct, batch_total)
+        batch_acc = self.acc_meter.add(batch_correct, batch_total)
 
-        self._state_repr = f'{self._prefix()} - loss={batch_loss:.6f}, accuracy={batch_accuracy:.3f}'
+        self._state_repr = f'{self._prefix()} - loss={batch_loss:.6f}, acc={batch_acc:.3f}'
 
     def epoch_finished(self) -> Dict[str, Union[int, float]]:
         assert 0 < self.epoch <= self.num_epochs
@@ -75,10 +75,10 @@ class TrainEvalEpochHandler(EpochHandler):
         self.in_epoch = False
 
         epoch_loss = self.loss_meter.value()
-        epoch_accuracy = self.accuracy_meter.value()
+        epoch_acc = self.acc_meter.value()
 
-        self._state_repr = f'{self._prefix()} - loss={epoch_loss:.6f}, accuracy={epoch_accuracy:.3f}'
-        return {'loss': epoch_loss, 'accuracy': epoch_accuracy}
+        self._state_repr = f'{self._prefix()} - loss={epoch_loss:.6f}, acc={epoch_acc:.3f}'
+        return {'loss': epoch_loss, 'acc': epoch_acc}
 
     def state_repr(self) -> str:
         return self._state_repr
