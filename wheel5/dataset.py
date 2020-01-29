@@ -1,31 +1,27 @@
 import os
 import pathlib
+from struct import pack, unpack
 from typing import Callable, Tuple, List, Optional
 
 import lmdb
-from struct import pack, unpack
+import numpy as np
+import pandas as pd
 from PIL import Image
 from PIL.Image import Image as Img
-
-import pandas as pd
-import numpy as np
 from numpy.random.mtrand import RandomState
-
 from torch.utils.data import Dataset
+from albumentations import BasicTransform
 
 
 class LMDBImageDataset(Dataset):
     @staticmethod
-    def cached(df: pd.DataFrame, image_dir: str, lmdb_path: str, lmdb_map_size: int = int(8 * (1024 ** 3)),
-               prepare_transform: Callable[[Img], Img] = None,
-               getitem_transform: Callable[[Img], Img] = None):
-
+    def cached(df: pd.DataFrame, image_dir: str, lmdb_path: str, lmdb_map_size: int = int(8 * (1024 ** 3)), transform: Callable[[Img], Img] = None):
         if os.path.exists(lmdb_path):
-            assert os.path.isdir(lmdb_path)            
+            assert os.path.isdir(lmdb_path)
         else:
-            LMDBImageDataset.prepare(df, image_dir, lmdb_path, lmdb_map_size, prepare_transform)
-            
-        return LMDBImageDataset(df, lmdb_path, lmdb_map_size, getitem_transform)
+            LMDBImageDataset.prepare(df, image_dir, lmdb_path, lmdb_map_size, transform)
+
+        return LMDBImageDataset(df, lmdb_path, lmdb_map_size)
 
     @staticmethod
     def prepare(df: pd.DataFrame, image_dir: str, lmdb_path: str, lmdb_map_size: int = int(8 * (1024 ** 3)), transform: Callable[[Img], Img] = None):
@@ -49,12 +45,14 @@ class LMDBImageDataset(Dataset):
                     v_meta = pack('HH', w, h)
                     txn.put(k_meta, v_meta)
 
-    def __init__(self, df: pd.DataFrame, lmdb_path: str, lmdb_map_size: int = int(8 * (1024 ** 3)), transform: Callable[[Img], Img] = None):
-        self.transform = transform
+    def __init__(self, df: pd.DataFrame, lmdb_path: str, lmdb_map_size: int = int(8 * (1024 ** 3))):
+        super(LMDBImageDataset, self).__init__()
+
         self.df = df
 
         self.df_count = df.shape[0]
 
+        # TODO: bad naming
         self.name_by_idx = list(np.sort(df['name'].unique()))
         self.idx_by_name = {x: i for i, x in enumerate(self.name_by_idx)}
 
@@ -78,25 +76,53 @@ class LMDBImageDataset(Dataset):
             w, h = unpack('HH', v_meta)
             image = Image.frombytes('RGB', (w, h), v_data)
 
-        if self.transform:
-            image = self.transform(image)
-
         return image, self.idx_by_name[name], name, index
 
     def classes(self) -> int:
         return len(self.name_by_idx)
 
 
-class WrappingTransformDataset(Dataset):
-    def __init__(self, wrapped: Dataset, transform_fn):
+class TransformDataset(Dataset):
+    def __init__(self, wrapped: Dataset, transform: Callable[[Img], Img]):
+        super(TransformDataset, self).__init__()
+
         self.wrapped = wrapped
-        self.transform_fn = transform_fn
+        self.transform = transform
 
     def __len__(self) -> int:
         return len(self.wrapped)
 
     def __getitem__(self, index: int):
-        return self.transform_fn(self.wrapped[index])
+        item_tuple = self.wrapped[index]
+        item_list = list(item_tuple)
+
+        image = item_list[0]
+        image = self.transform(image)
+        item_list[0] = image
+
+        return tuple(item_list)
+
+
+class AlbumentationsDataset(TransformDataset):
+    def __init__(self, wrapped: Dataset, transform: BasicTransform):
+        def callable_transform(image: Img) -> Img:
+            image_arr = np.array(image)
+            aug_arr = transform(image=image_arr)
+            return Image.fromarray(aug_arr['image'])
+
+        super(AlbumentationsDataset, self).__init__(wrapped, callable_transform)
+
+
+class MappingDataset(Dataset):
+    def __init__(self, wrapped: Dataset, fn):
+        self.wrapped = wrapped
+        self.fn = fn
+
+    def __len__(self) -> int:
+        return len(self.wrapped)
+
+    def __getitem__(self, index: int):
+        return self.fn(self.wrapped[index])
 
 
 def split_indices(indices: List[int], split: float, random_state: Optional[RandomState] = None) -> (List[int], List[int]):
