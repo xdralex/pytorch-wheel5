@@ -76,8 +76,6 @@ class Tracker(object):
         self.tensorboard_cfg = tensorboard_cfg
         self.experiment = experiment
 
-        self.trials = {}
-
     @property
     def snapshot_dir(self) -> str:
         return os.path.join(self.snapshot_cfg.root_dir, self.experiment)
@@ -87,15 +85,12 @@ class Tracker(object):
         return os.path.join(self.tensorboard_cfg.root_dir, self.experiment)
 
     def new_trial(self, hparams: Optional[Dict[str, float]] = None) -> 'TrialTracker':
-        if hparams is None:
-            trial = f'{datetime.datetime.now():%Y-%m-%d_%H:%M:%S}'
-        else:
-            trial = Tracker.dict_to_key(hparams)
+        date_str = f'{datetime.datetime.now():%Y-%m-%d_%H:%M:%S.%f}'
 
-        counter = self.trials.setdefault(trial, 0)
-        self.trials[trial] += 1
-        if counter > 0:
-            trial = f'{trial}_{counter}'
+        if hparams is None:
+            trial = date_str
+        else:
+            trial = f'{Tracker.dict_to_key(hparams)}-{date_str}'
 
         return TrialTracker(self.snapshot_cfg, self.tensorboard_cfg, self.experiment, trial, hparams)
 
