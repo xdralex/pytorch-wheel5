@@ -1,7 +1,7 @@
 import os
 import pathlib
 from struct import pack, unpack
-from typing import Callable, Tuple, List, Optional
+from typing import Callable, Tuple, List, Optional, NamedTuple
 
 import lmdb
 import numpy as np
@@ -9,7 +9,7 @@ import pandas as pd
 from PIL import Image
 from PIL.Image import Image as Img
 from numpy.random.mtrand import RandomState
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 from albumentations import BasicTransform
 
 
@@ -125,6 +125,12 @@ class MappingDataset(Dataset):
         return self.fn(self.wrapped[index])
 
 
+class DataBundle(NamedTuple):
+    loader: DataLoader
+    dataset: Dataset
+    indices: List[int]
+
+
 def split_indices(indices: List[int], split: float, random_state: Optional[RandomState] = None) -> (List[int], List[int]):
     if random_state is None:
         random_state = np.random.RandomState()
@@ -134,3 +140,28 @@ def split_indices(indices: List[int], split: float, random_state: Optional[Rando
 
     divider = int(np.round(split * len(indices)))
     return shuffled_indices[:divider], shuffled_indices[divider:]
+
+
+def split_eval_main_data(bundle: DataBundle,
+                         split: float,
+                         eval_batch: int = 256,
+                         main_batch: int = 64,
+                         eval_workers: int = 4,
+                         main_workers: int = 4,
+                         random_state: Optional[RandomState] = None) -> (DataBundle, DataBundle):
+
+    if random_state is None:
+        random_state = np.random.RandomState()
+
+    eval_indices, main_indices = split_indices(bundle.indices, split=split, random_state=random_state)
+
+    eval_sampler = SubsetRandomSampler(eval_indices)
+    main_sampler = SubsetRandomSampler(main_indices)
+
+    eval_loader = DataLoader(bundle.dataset, batch_size=eval_batch, sampler=eval_sampler, num_workers=eval_workers, pin_memory=True)
+    main_loader = DataLoader(bundle.dataset, batch_size=main_batch, sampler=main_sampler, num_workers=main_workers, pin_memory=True)
+
+    eval_bundle = DataBundle(loader=eval_loader, dataset=bundle.dataset, indices=eval_indices)
+    main_bundle = DataBundle(loader=main_loader, dataset=bundle.dataset, indices=main_indices)
+
+    return eval_bundle, main_bundle
