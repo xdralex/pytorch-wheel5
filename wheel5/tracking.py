@@ -156,6 +156,10 @@ class TrialTracker(object):
             self.tb_writer.add_scalar(f'fit/train/{k}', v, state.epoch)
         for k, v in state.val_metrics.items():
             self.tb_writer.add_scalar(f'fit/val/{k}', v, state.epoch)
+        for k in (set(state.train_metrics.keys()) & set(state.val_metrics.keys())):
+            d = {'train': state.train_metrics[k], 'val': state.val_metrics[k]}
+            self.tb_writer.add_scalars(f'fit/{k}', d, state.epoch)
+
         self.tb_writer.flush()
 
         # Snapshots

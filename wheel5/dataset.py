@@ -3,6 +3,7 @@ import pathlib
 from struct import pack, unpack
 from typing import Callable, Tuple, List, Optional, NamedTuple
 
+import albumentations as albu
 import lmdb
 import numpy as np
 import pandas as pd
@@ -10,9 +11,9 @@ from PIL import Image
 from PIL.Image import Image as Img
 from numpy.random.mtrand import RandomState
 from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
-from albumentations import BasicTransform
 
 
+# TODO: make abstract enough to handle different datasets
 class LMDBImageDataset(Dataset):
     @staticmethod
     def cached(df: pd.DataFrame, image_dir: str, lmdb_path: str, lmdb_map_size: int = int(8 * (1024 ** 3)), transform: Callable[[Img], Img] = None):
@@ -64,7 +65,7 @@ class LMDBImageDataset(Dataset):
     def __getitem__(self, index: int) -> Tuple[Img, int, str, int]:
         row = self.df.iloc[index, :]
 
-        name = row['name']
+        name = row.name
 
         with self.lmdb_env.begin(write=False) as txn:
             k_data = f'data_{row.path}'.encode('ascii')
@@ -104,7 +105,7 @@ class TransformDataset(Dataset):
 
 
 class AlbumentationsDataset(TransformDataset):
-    def __init__(self, wrapped: Dataset, transform: BasicTransform):
+    def __init__(self, wrapped: Dataset, transform: albu.BasicTransform):
         def callable_transform(image: Img) -> Img:
             image_arr = np.array(image)
             aug_arr = transform(image=image_arr)
