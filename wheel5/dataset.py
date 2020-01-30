@@ -14,6 +14,7 @@ from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 
 
 # TODO: make abstract enough to handle different datasets
+# TODO: use transform repr (name or hash) in the path to avoid clashing mistakes?
 class LMDBImageDataset(Dataset):
     @staticmethod
     def cached(df: pd.DataFrame, image_dir: str, lmdb_path: str, lmdb_map_size: int = int(8 * (1024 ** 3)), transform: Callable[[Img], Img] = None):
@@ -65,7 +66,7 @@ class LMDBImageDataset(Dataset):
     def __getitem__(self, index: int) -> Tuple[Img, int, str, int]:
         row = self.df.iloc[index, :]
 
-        name = row.name
+        name = row['name']
 
         with self.lmdb_env.begin(write=False) as txn:
             k_data = f'data_{row.path}'.encode('ascii')

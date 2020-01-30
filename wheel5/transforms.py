@@ -1,3 +1,4 @@
+import math
 from numbers import Number
 from typing import Union, Tuple
 
@@ -21,8 +22,24 @@ class SquarePaddedResize(object):
             padding = (0, d1, 0, d2) if w > h else (d1, 0, d2, 0)
             img = F.pad(img, padding, self.fill)
 
-        img = F.resize(img, self.size, self.interpolation)
-        return img
+        return F.resize(img, self.size, self.interpolation)
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}(size={self.size}, fill={self.fill}, interpolation={self.interpolation})'
+
+
+class Rescale(object):
+    def __init__(self, scale: float, interpolation: int = Image.BILINEAR):
+        self.scale = scale
+        self.interpolation = interpolation
+
+    def __call__(self, img: Image) -> Image:
+        w, h = img.size
+
+        new_w = int(round(w * self.scale))
+        new_h = int(round(h * self.scale))
+
+        return F.resize(img, (new_h, new_w), self.interpolation)
+
+    def __repr__(self) -> str:
+        return f'{self.__class__.__name__}(size={self.scale}, interpolation={self.interpolation})'
