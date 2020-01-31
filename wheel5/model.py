@@ -1,7 +1,7 @@
 import logging
 import math
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Union, List
 
 import numpy as np
 import torch
@@ -109,12 +109,12 @@ class PredictEpochHandler(EpochHandler):
     def batch_processed(self, x: Tensor, y: Tensor, y_probs: Tensor, y_hat: Tensor, loss_value: Optional[Tensor], indices: Tensor):
         assert self.in_epoch
 
-        self.y_accum.add(y.cpu().numpy())
-        self.y_probs_accum.add(y_probs.cpu().numpy())
-        self.y_hat_accum.add(y_hat.cpu().numpy())
-        self.indices_accum.add(indices.cpu().numpy())
+        self.y_accum.add(y.cpu())
+        self.y_probs_accum.add(y_probs.cpu())
+        self.y_hat_accum.add(y_hat.cpu())
+        self.indices_accum.add(indices.cpu())
 
-    def epoch_finished(self) -> Dict[str, np.ndarray]:
+    def epoch_finished(self) -> Dict[str, Tensor]:
         assert self.in_epoch
         self.in_epoch = False
 
@@ -166,10 +166,54 @@ def score(device: Union[torch.device, int],
     return run_epoch(device, model, loader, loss, None, handler, display_progress=display_progress)
 
 
+def score_blend(device: Union[torch.device, int],
+                models: List[Module],
+                loader: DataLoader,
+                loss: Module,
+                display_progress: bool = True) -> Dict[str, Union[int, float]]:
+
+    assert len(models) > 0
+
+    y = None
+    y_probs_list = []
+
+    for model in models:
+        model_device = model.to(device)
+
+        handler = PredictEpochHandler()
+        results = run_epoch(device, model_device, loader, None, None, handler, display_progress=display_progress)
+
+        order = torch.argsort(results['indices'])
+        y_ordered = torch.index_select(results['y'], dim=0, index=order)
+        y_probs_ordered = torch.index_select(results['y_probs'], dim=0, index=order)
+
+        if y is None:
+            y = y_ordered
+        else:
+            assert bool(torch.eq(y, y_ordered).all())
+
+        y_probs_list.append(y_probs_ordered)
+
+        del model
+
+    y_probs_stack = torch.stack(y_probs_list, dim=0)
+    y_probs_blend = torch.mean(y_probs_stack, dim=0)
+
+    y_hat = torch.argmax(y_probs_blend, 1)
+    loss_value = float(loss(y_probs_blend, y))
+
+    correct = float(torch.sum(y_hat == y))
+    total = float(y.shape[0])
+
+    acc = correct / total
+
+    return {'loss': loss_value, 'acc': acc}
+
+
 def predict(device: Union[torch.device, int],
             model: Module,
             loader: DataLoader,
-            display_progress: bool = True) -> Dict[str, np.ndarray]:
+            display_progress: bool = True) -> Dict[str, Tensor]:
     handler = PredictEpochHandler()
     return run_epoch(device, model, loader, None, None, handler, display_progress=display_progress)
 

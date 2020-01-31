@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 
-import numpy as np
+import torch
+from torch import Tensor
 
 
 class Meter(ABC):
@@ -139,14 +140,13 @@ class AccuracyMeter(Meter):
 
 class ArrayAccumMeter(Meter):
     def __init__(self):
-        self.accum = None
+        self.accum = []
 
-    def add(self, arr):
-        self.accum = arr if self.accum is None else np.concatenate((self.accum, arr))
-        return arr
+    def add(self, tensor: Tensor):
+        self.accum.append(tensor)
 
     def reset(self):
-        self.accum = None
+        self.accum = []
 
     def value(self):
-        return self.accum
+        return torch.cat(self.accum)
