@@ -12,6 +12,11 @@ from torch import nn
 # Inspired by torchviz and pytorch-summary
 #
 
+# TODO: need to support in-place operations (such as in-place ReLU)
+# TODO: bug - ResNet-34 layer1.0.bn2 is not compacted
+# TODO: need to support operations when the same module (e.g. memoryless ReLU) is used multiple times
+# TODO: bug - ResNet-50 layer2.0.conv1 discrepancy between summary and the graph
+
 def size_to_str(size: Iterable[int]) -> str:
     return 'x'.join(['%d' % v for v in size])
 
