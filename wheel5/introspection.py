@@ -44,18 +44,20 @@ class NodeData(ABC):
 
 
 class ModuleData(NodeData):
-    def __init__(self, class_name: str, params: Dict[TensorId, Tuple[str, List[int]]], fake: bool = False):
+    def __init__(self, class_name: str, name: Optional[str], params: Dict[TensorId, Tuple[str, List[int]]], fake: bool = False):
         super(ModuleData, self).__init__()
 
         self.class_name = class_name
+        self.name = name
         self.params = params
         self.fake = fake
 
     def __repr__(self):
         fake_str = 'fake_' if self.fake else ''
+        name_str = f'[{self.name}]' if self.name is not None else ''
         params_str = ', '.join([f'{tid}: {name} {size_to_str(size)}' for tid, (name, size) in self.params.items()])
 
-        return f'{fake_str}module.{self.class_name}({params_str})'
+        return f'{fake_str}module.{self.class_name}{name_str}({params_str})'
 
 
 class VarData(NodeData):
@@ -254,14 +256,19 @@ class LogRecord(object):
 
 def introspect(model: nn.Module, input_size) -> NetworkGraph:
     anti_gc = set()  # Needed to prevent the variables from being reused by the torch backend
-
     hook_handles = []
-
-    params = dict(model.named_parameters())
-    param_map = {tensor_id(v): k for k, v in params.items()}
-
     network_graph = NetworkGraph()
     log = []
+
+    def init_param_map():
+        params = dict(model.named_parameters())
+        return {tensor_id(v): k for k, v in params.items()}
+
+    def init_module_names_map():
+        return {id(module): name for name, module in list(model.named_modules())}
+
+    param_map = init_param_map()
+    module_names_map = init_module_names_map()
 
     def traverse_grad(var):
         anti_gc.add(var)
@@ -371,8 +378,9 @@ def introspect(model: nn.Module, input_size) -> NetworkGraph:
                         d = dict(record.module.named_parameters(recurse=False))
                         module_params = {tensor_id(v): (k, tuple(v.size())) for k, v in d.items()}
                         module_class_name = str(record.module.__class__).split(".")[-1].split("'")[0]
+                        module_name = module_names_map.get(id(record.module))
 
-                        network_graph.add_node(module_id, ModuleData(class_name=module_class_name, params=module_params))
+                        network_graph.add_node(module_id, ModuleData(class_name=module_class_name, name=module_name, params=module_params))
 
                     attach_or_update_tensor(gid_out, tensor_out, 'Tensor', force_class=True)
                     network_graph.add_edge(module_id, gid_out)
@@ -401,7 +409,7 @@ def introspect(model: nn.Module, input_size) -> NetworkGraph:
                                 edges_to_delete.append((gid_in, gid_out))
                                 affected_param_nodes.add(gid_in)
 
-                    network_graph.replace_node(gid_out, ModuleData(data_out.class_name, module_params, fake=True))
+                    network_graph.replace_node(gid_out, ModuleData(data_out.class_name, name=None, params=module_params, fake=True))
 
         for gid_in, gid_out in edges_to_delete:
             network_graph.delete_edge(gid_in, gid_out)
@@ -462,6 +470,9 @@ def make_dot(graph: NetworkGraph) -> Digraph:
             dot.node(str(gid), text, fillcolor=color)
         elif isinstance(data, ModuleData):
             text = f'{data.class_name}'
+            if data.name is not None:
+                text += f'\n[{data.name}]'
+
             for _, (name, size) in data.params.items():
                 text += f'\n{name} - {size_to_str(size)}'
 
