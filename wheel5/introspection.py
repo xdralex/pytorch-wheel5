@@ -95,7 +95,7 @@ class VarData(NodeData):
         return (self.is_variable()) and (self.comment is not None)
 
 
-class Beam(NamedTuple):
+class Wave(NamedTuple):
     seed: GradId
     inners: Set[GradId]
     terminators: Set[GradId]
@@ -167,7 +167,7 @@ class NetworkGraph(object):
     def contains(self, gid: GradId) -> bool:
         return gid in self.nodes
 
-    def beam_search(self, gid: GradId, control: Callable[[GradId, NodeData], ControlFlow]) -> Optional[Beam]:
+    def wave_search(self, gid: GradId, control: Callable[[GradId, NodeData], ControlFlow]) -> Optional[Wave]:
         if gid not in self.nodes:
             return None
 
@@ -175,7 +175,7 @@ class NetworkGraph(object):
 
         inners = set()
         terminators = set()
-        beam_edges = []
+        wave_edges = []
 
         while len(stack) > 0:
             gid_out = stack.pop()
@@ -185,7 +185,7 @@ class NetworkGraph(object):
                 return None
 
             for gid_in in gids_in:
-                beam_edges.append((gid_out, gid_in))
+                wave_edges.append((gid_out, gid_in))
 
                 flow = control(gid_in, self.nodes[gid_in])
                 if flow == ControlFlow.STOP:
@@ -199,14 +199,14 @@ class NetworkGraph(object):
                 else:
                     raise AssertionError(f'Unexpected control flow: {flow}')
 
-        return Beam(gid, inners, terminators, beam_edges)
+        return Wave(gid, inners, terminators, wave_edges)
 
-    def drop_beam(self, beam: Beam, exclude_gids: Set[GradId]):
-        for gid in beam.inners.union(beam.terminators):
+    def drop_wave(self, wave: Wave, exclude_gids: Set[GradId]):
+        for gid in wave.inners.union(wave.terminators):
             if gid not in exclude_gids:
                 self.nodes.pop(gid, None)
 
-        for gid_out, gid_in in beam.edges:
+        for gid_out, gid_in in wave.edges:
             if gid_out in self.edges:
                 self.edges[gid_out].remove(gid_in)
                 if len(self.edges[gid_out]) == 0:
@@ -314,7 +314,7 @@ def introspect(model: nn.Module, input_size) -> NetworkGraph:
     def run_model():
         dtype = torch.cuda.FloatTensor
         input_size_tuple = [input_size] if not isinstance(input_size, tuple) else input_size
-        x = [torch.rand(*in_size).type(dtype) for in_size in input_size_tuple]
+        x = [torch.randn(*in_size, requires_grad=True).type(dtype) for in_size in input_size_tuple]
 
         model.apply(register_hook)
         y = model(*x)
@@ -361,9 +361,9 @@ def introspect(model: nn.Module, input_size) -> NetworkGraph:
             for tensor_out in record.output:
                 gid_out = grad_id(tensor_out.grad_fn)
 
-                beam = network_graph.beam_search(gid_out, control_flow(record))
-                if beam is not None:
-                    network_graph.drop_beam(beam, record.input_gids)
+                wave = network_graph.wave_search(gid_out, control_flow(record))
+                if wave is not None:
+                    network_graph.drop_wave(wave, record.input_gids)
 
                     # Replacing removed nodes with the module data
                     module_id = GradId(id=f'module#{index}')
@@ -423,12 +423,13 @@ def introspect(model: nn.Module, input_size) -> NetworkGraph:
     run_model()
 
     # print(network_graph)
+
     # for r in log:
     #     print(r)
 
     compact_graph()
 
-    print(network_graph)
+    # print(network_graph)
 
     return network_graph
 
