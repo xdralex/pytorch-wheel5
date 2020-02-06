@@ -243,18 +243,18 @@ def run_epoch(device: Union[torch.device, int],
             handler.epoch_started()
             progress_bar.set_description(handler.state_repr())
 
-            for i, (x, y, _, indices) in enumerate(loader):
+            for i, (x_cpu, y_cpu, indices) in enumerate(loader):
                 log_status('  started batch')
 
-                x_gpu = x.to(device)
-                y_gpu = y.to(device)
+                x = x_cpu.to(device)
+                y = y_cpu.to(device)
                 log_status('    loaded batch')
 
-                y_probs = model(x_gpu)
+                y_probs = model(x)
                 y_hat = torch.argmax(y_probs, 1)
                 log_status('    performed forward pass')
 
-                loss_value = None if loss is None else loss(y_probs, y_gpu)
+                loss_value = None if loss is None else loss(y_probs, y)
                 log_status('    computed loss value')
 
                 if optimizer is not None:
@@ -268,7 +268,7 @@ def run_epoch(device: Union[torch.device, int],
                     optimizer.step()
                     log_status('    stepped optimizer')
 
-                handler.batch_processed(x_gpu, y_gpu, y_probs, y_hat, loss_value, indices)
+                handler.batch_processed(x, y, y_probs, y_hat, loss_value, indices)
                 progress_bar.update()
                 progress_bar.set_description(handler.state_repr())
 

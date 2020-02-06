@@ -27,19 +27,20 @@ class LMDBImageDataset(Dataset):
                lmdb_path: str,
                lmdb_map_size: int = int(8 * (1024 ** 3)),
                transform: Callable[[Img], Img] = None,
-               check_transform: bool = True):
+               check_fingerprint: bool = True):
 
         if os.path.exists(lmdb_path):
             if not os.path.isdir(lmdb_path):
                 raise Exception(f'LMDB path {lmdb_path} must be a directory')
 
-            if check_transform:
-                with open(os.path.join(lmdb_path, '.transform'), mode='r') as f:
-                    lmdb_transform_str = f.read().strip()
-                    if lmdb_transform_str != str(transform):
-                        raise Exception(f'Transform used in LMDB is different from the supplied transform:\n' +
-                                        f'lmdb transform: {lmdb_transform_str}\n' +
-                                        f'supplied transform: {transform}')
+            if check_fingerprint:
+                with open(os.path.join(lmdb_path, '.fingerprint'), mode='r') as f:
+                    lmdb_fingerprint = f.read().strip()
+                    supplied_fingerprint = LMDBImageDataset.fingerprint(df, image_dir, transform)
+                    if lmdb_fingerprint != supplied_fingerprint:
+                        raise Exception(f'Fingerprint used in LMDB is different from the supplied fingerprint:\n' +
+                                        f'lmdb fingerprint: {lmdb_fingerprint}\n' +
+                                        f'supplied fingerprint: {supplied_fingerprint}')
         else:
             LMDBImageDataset.prepare(df, image_dir, lmdb_path, lmdb_map_size, transform)
 
@@ -50,14 +51,12 @@ class LMDBImageDataset(Dataset):
                 image_dir: str,
                 lmdb_path: str,
                 lmdb_map_size: int = int(8 * (1024 ** 3)),
-                transform: Callable[[Img], Img] = None,
-                write_transform: bool = True):
+                transform: Callable[[Img], Img] = None):
 
         pathlib.Path(lmdb_path).mkdir(parents=True, exist_ok=False)
 
-        if write_transform:
-            with open(os.path.join(lmdb_path, '.transform'), mode='x') as f:
-                f.write(f'{transform}\n')
+        with open(os.path.join(lmdb_path, '.fingerprint'), mode='x') as f:
+            f.write(f'{LMDBImageDataset.fingerprint(df, image_dir, transform)}\n')
 
         with lmdb.open(lmdb_path, map_size=lmdb_map_size, subdir=True) as lmdb_env:
             with lmdb_env.begin(write=True) as txn:
@@ -77,6 +76,11 @@ class LMDBImageDataset(Dataset):
                     k_meta = f'meta_{row.path}'.encode('ascii')
                     v_meta = pack('HH', w, h)
                     txn.put(k_meta, v_meta)
+
+    @staticmethod
+    def fingerprint(df: pd.DataFrame, image_dir: str, transform: Callable[[Img], Img]) -> str:
+        df_hash = hash(df.values.tobytes())
+        return f'{df_hash} - {image_dir}\n{transform}'
 
     def __init__(self,
                  df: pd.DataFrame,
