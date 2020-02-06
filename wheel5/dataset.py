@@ -60,7 +60,7 @@ class LMDBImageDataset(Dataset):
 
         with lmdb.open(lmdb_path, map_size=lmdb_map_size, subdir=True) as lmdb_env:
             with lmdb_env.begin(write=True) as txn:
-                for row in df.itertuples():
+                for index, row in enumerate(df.itertuples()):
                     image_path = os.path.join(image_dir, row.path)
                     image = Image.open(image_path)
 
@@ -69,11 +69,11 @@ class LMDBImageDataset(Dataset):
 
                     w, h = image.size
 
-                    k_data = f'data_{row.path}'.encode('ascii')
+                    k_data = f'data#{index}'.encode('ascii')
                     v_data = image.tobytes()
                     txn.put(k_data, v_data)
 
-                    k_meta = f'meta_{row.path}'.encode('ascii')
+                    k_meta = f'meta#{index}'.encode('ascii')
                     v_meta = pack('HH', w, h)
                     txn.put(k_meta, v_meta)
 
@@ -99,10 +99,10 @@ class LMDBImageDataset(Dataset):
         target = row['target']
 
         with self.lmdb_env.begin(write=False) as txn:
-            k_data = f'data_{row.path}'.encode('ascii')
+            k_data = f'data#{index}'.encode('ascii')
             v_data = txn.get(k_data)
 
-            k_meta = f'meta_{row.path}'.encode('ascii')
+            k_meta = f'meta#{index}'.encode('ascii')
             v_meta = txn.get(k_meta)
 
             w, h = unpack('HH', v_meta)
