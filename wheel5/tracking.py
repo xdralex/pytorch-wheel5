@@ -193,9 +193,14 @@ class TrialTracker(object):
             f.write(f'{datetime.datetime.now():%Y-%m-%d_%H:%M:%S.%f}\n')
 
     @staticmethod
-    def load_stats(snapshot_cfg: SnapshotConfig, experiment: str, trial: str) -> Optional[pd.DataFrame]:
+    def load_stats(snapshot_cfg: SnapshotConfig, experiment: str, trial: str, load_hparams: bool = True, complete_only: bool = True) -> Optional[pd.DataFrame]:
         directory = os.path.join(snapshot_cfg.root_dir, experiment, trial)
-        if not os.path.exists(os.path.join(directory, '.completed')):
+
+        if complete_only:
+            if not os.path.exists(os.path.join(directory, '.completed')):
+                return None
+
+        if not os.path.exists(os.path.join(directory, 'metrics.csv')):
             return None
 
         trial_df = pd.read_csv(filepath_or_buffer=os.path.join(directory, 'metrics.csv'), sep=',', header=0)
@@ -204,13 +209,14 @@ class TrialTracker(object):
         trial_df.insert(1, 'trial', trial)
 
         # Hyperparameters
-        with open(os.path.join(directory, 'hyperparameters.json'), 'r') as f:
-            hparams = json.load(f)
+        if load_hparams:
+            with open(os.path.join(directory, 'hyperparameters.json'), 'r') as f:
+                hparams = json.load(f)
 
-        counter = 2
-        for k, v in hparams.items():
-            trial_df.insert(counter, k, float(v))
-            counter += 1
+            counter = 2
+            for k, v in hparams.items():
+                trial_df.insert(counter, k, float(v))
+                counter += 1
 
         # Snapshots
         trial_df['snapshot'] = ''
