@@ -97,7 +97,7 @@ class Tracker(object):
     @staticmethod
     def dict_to_key(hparams: Dict[str, float]) -> str:
         def format_float(v: float) -> str:
-            zeros = math.ceil(math.log10(v))
+            zeros = math.ceil(math.log10(math.fabs(v) + 1))
             if zeros < 5:
                 return f'{v:.{5 - zeros}f}'
             else:
