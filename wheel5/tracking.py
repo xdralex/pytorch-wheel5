@@ -180,13 +180,23 @@ class TrialTracker(object):
                 self.tb_writer.add_histogram(f'weights/{name}', param, state.epoch)
 
         def write_samples(samples, samples_name: str):
-            if  self.tensorboard_cfg.track_samples and len(samples) > 0:
+            def arr2str(arr):
+                return f'[' + ', '.join([f'{arr_elem:.3f}' for arr_elem in arr]) + ']'
+
+            if self.tensorboard_cfg.track_samples and len(samples) > 0:
                 x = torch.stack([self.sample_img_transform(s.x) for s in samples])
+
+                y_strs = []
+                for i in range(0, len(samples)):
+                    s = samples[i]
+                    y_strs.append(f'y={float(s.y):.3f}, y_hat={float(s.y_hat):.3f}, y_probs={arr2str(s.y_probs)}')
+                y_text = '  \n'.join(y_strs)
+
                 self.tb_writer.add_images(f'samples_x/{samples_name}', x, state.epoch)
+                self.tb_writer.add_text(f'samples_y/{samples_name}', y_text, state.epoch)
 
         write_samples(train_samples, 'train')
         write_samples(val_samples, 'val')
-
 
         self.tb_writer.flush()
 
