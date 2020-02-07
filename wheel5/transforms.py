@@ -5,6 +5,21 @@ from PIL import Image
 from torchvision.transforms import functional as F
 
 
+class InvNormalize(object):
+    def __init__(self, mean, std, inplace=False):
+        self.mean = mean
+        self.std = std
+        self.inplace = inplace
+
+    def __call__(self, tensor):
+        mean = -self.mean / self.std
+        std = 1.0 / self.std
+        return F.normalize(tensor, mean, std, self.inplace)
+
+    def __repr__(self):
+        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
+
+
 class PadToSquare(object):
     def __init__(self, fill: Union[Number, str, tuple] = 0):
         self.fill = fill
