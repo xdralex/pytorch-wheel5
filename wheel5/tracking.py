@@ -68,6 +68,7 @@ class SnapshotConfig(NamedTuple):
 
 class TensorboardConfig(NamedTuple):
     root_dir: str
+    track_weights: bool
 
 
 class Tracker(object):
@@ -159,6 +160,10 @@ class TrialTracker(object):
         for k in (set(state.train_metrics.keys()) & set(state.val_metrics.keys())):
             d = {'train': state.train_metrics[k], 'val': state.val_metrics[k]}
             self.tb_writer.add_scalars(f'fit/{k}', d, state.epoch)
+
+        if self.tensorboard_cfg.track_weights:
+            for name, param in state.model.named_parameters():
+                self.tb_writer.add_histogram(f'weights/{name}', param, state.epoch)
 
         self.tb_writer.flush()
 

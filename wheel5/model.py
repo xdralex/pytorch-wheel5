@@ -138,6 +138,24 @@ def fit(device: Union[torch.device, int],
         num_epochs: int,
         tracker: Optional[TrialTracker] = None,
         display_progress: bool = True):
+
+    # Dummy scoring
+    dummy_train_handler = TrainEvalEpochHandler('dummy-train', num_epochs=1)
+    dummy_val_handler = TrainEvalEpochHandler('dummy-val', num_epochs=1)
+
+    dummy_train_metrics = run_epoch(device, model, train_loader, loss, None, dummy_train_handler, display_progress=display_progress)
+    dummy_val_metrics = run_epoch(device, model, val_loader, loss, None, dummy_val_handler, display_progress=display_progress)
+
+    if tracker:
+        tracker.epoch_completed(FitState(model=model,
+                                         loss=loss,
+                                         optimizer=optimizer,
+                                         epoch=0,
+                                         num_epochs=num_epochs,
+                                         train_metrics=dummy_train_metrics,
+                                         val_metrics=dummy_val_metrics))
+
+    # Training
     train_handler = TrainEvalEpochHandler('train', num_epochs)
     val_handler = TrainEvalEpochHandler('val', num_epochs)
 
@@ -146,15 +164,13 @@ def fit(device: Union[torch.device, int],
         val_metrics = run_epoch(device, model, val_loader, loss, None, val_handler, display_progress=display_progress)
 
         if tracker:
-            state = FitState(model=model,
-                             loss=loss,
-                             optimizer=optimizer,
-                             epoch=epoch,
-                             num_epochs=num_epochs,
-                             train_metrics=train_metrics,
-                             val_metrics=val_metrics)
-
-            tracker.epoch_completed(state)
+            tracker.epoch_completed(FitState(model=model,
+                                             loss=loss,
+                                             optimizer=optimizer,
+                                             epoch=epoch,
+                                             num_epochs=num_epochs,
+                                             train_metrics=train_metrics,
+                                             val_metrics=val_metrics))
 
 
 def score(device: Union[torch.device, int],
@@ -171,7 +187,6 @@ def score_blend(device: Union[torch.device, int],
                 loader: DataLoader,
                 loss: Module,
                 display_progress: bool = True) -> Dict[str, Union[int, float]]:
-
     assert len(models) > 0
 
     y = None
