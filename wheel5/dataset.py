@@ -12,6 +12,9 @@ from PIL.Image import Image as Img
 from numpy.random.mtrand import RandomState
 from torch.utils.data import Dataset, DataLoader
 
+from pandas.util import hash_pandas_object
+import hashlib
+
 
 class LMDBImageDataset(Dataset):
     r"""A dataset storing images in the LMDB store.
@@ -79,8 +82,8 @@ class LMDBImageDataset(Dataset):
 
     @staticmethod
     def fingerprint(df: pd.DataFrame, image_dir: str, transform: Callable[[Img], Img]) -> str:
-        df_hash = hash(df.values.tobytes())
-        return f'{df_hash} - {image_dir}\n{transform}'
+        df_hash = hashlib.sha256(hash_pandas_object(df, index=True).values).hexdigest()
+        return f'{df_hash}\n{image_dir}\n{transform}'
 
     def __init__(self,
                  df: pd.DataFrame,
