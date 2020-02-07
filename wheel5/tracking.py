@@ -25,7 +25,8 @@ class FitState(object):
                  epoch: int,
                  num_epochs: int,
                  train_metrics: Dict[str, Union[int, float]],
-                 val_metrics: Dict[str, Union[int, float]]):
+                 val_metrics: Dict[str, Union[int, float]],
+                 ctrl_metrics: Dict[str, Union[int, float]]):
         self.model = model
         self.loss = loss
         self.optimizer = optimizer
@@ -33,6 +34,7 @@ class FitState(object):
         self.num_epochs = num_epochs
         self.train_metrics = train_metrics
         self.val_metrics = val_metrics
+        self.ctrl_metrics = ctrl_metrics
 
     @staticmethod
     def save(path: str, state: 'FitState'):
@@ -43,7 +45,8 @@ class FitState(object):
             'epoch': state.epoch,
             'num_epochs': state.num_epochs,
             'train_metrics': state.train_metrics,
-            'val_metrics': state.val_metrics
+            'val_metrics': state.val_metrics,
+            'ctrl_metrics': state.ctrl_metrics
         }
         torch.save(d, path)
 
@@ -57,7 +60,8 @@ class FitState(object):
             epoch=d['epoch'],
             num_epochs=d['num_epochs'],
             train_metrics=d['train_metrics'],
-            val_metrics=d['val_metrics']
+            val_metrics=d['val_metrics'],
+            ctrl_metrics=d['ctrl_metrics']
         )
 
 
@@ -165,14 +169,16 @@ class TrialTracker(object):
         with open(os.path.join(self.snapshot_dir, 'hyperparameters.json'), 'x') as f:
             json.dump(hparams, f, indent=2)
 
-    def epoch_completed(self, state: FitState, train_samples, val_samples):
+    def epoch_completed(self, state: FitState, train_samples, val_samples, ctrl_samples):
         # TensorBoard
         for k, v in state.train_metrics.items():
             self.tb_writer.add_scalar(f'fit/train/{k}', v, state.epoch)
         for k, v in state.val_metrics.items():
             self.tb_writer.add_scalar(f'fit/val/{k}', v, state.epoch)
-        for k in (set(state.train_metrics.keys()) & set(state.val_metrics.keys())):
-            d = {'train': state.train_metrics[k], 'val': state.val_metrics[k]}
+        for k, v in state.ctrl_metrics.items():
+            self.tb_writer.add_scalar(f'fit/ctrl/{k}', v, state.epoch)
+        for k in (set(state.train_metrics.keys()) & set(state.val_metrics.keys()) & set(state.ctrl_metrics.keys())):
+            d = {'train': state.train_metrics[k], 'val': state.val_metrics[k], 'ctrl': state.ctrl_metrics[k]}
             self.tb_writer.add_scalars(f'fit/{k}', d, state.epoch)
 
         if self.tensorboard_cfg.track_weights:
@@ -195,8 +201,10 @@ class TrialTracker(object):
                 self.tb_writer.add_images(f'samples_x/{samples_name}', x, state.epoch)
                 self.tb_writer.add_text(f'samples_y/{samples_name}', y_text, state.epoch)
 
-        write_samples(train_samples, 'train')
-        write_samples(val_samples, 'val')
+        if self.tensorboard_cfg.track_samples:
+            write_samples(train_samples, 'train')
+            write_samples(val_samples, 'val')
+            write_samples(ctrl_samples, 'ctrl')
 
         self.tb_writer.flush()
 
@@ -212,6 +220,7 @@ class TrialTracker(object):
         }
         metrics.update({f'train_{k}': v for k, v in state.train_metrics.items()})
         metrics.update({f'val_{k}': v for k, v in state.val_metrics.items()})
+        metrics.update({f'ctrl_{k}': v for k, v in state.ctrl_metrics.items()})
 
         self.metrics_list.append(metrics)
         self.metrics_df = pd.DataFrame(self.metrics_list)

@@ -153,6 +153,23 @@ class ArrayAccumMeter(Meter):
         return torch.cat(self.accum)
 
 
+class LimitedSamplingMeter(Meter):
+    def __init__(self, k):
+        self.k = k
+        self.accum = []
+
+    def add(self, elements):
+        for element in elements:
+            if len(self.accum) < self.k:
+                self.accum.append(element)
+
+    def reset(self):
+        self.accum = []
+
+    def value(self):
+        return self.accum
+
+
 class ReservoirSamplingMeter(Meter):
     def __init__(self, k, random_state: RandomState = None):
         self.k = k
