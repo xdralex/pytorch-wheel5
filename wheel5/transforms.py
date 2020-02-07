@@ -1,6 +1,7 @@
 from numbers import Number
 from typing import Union, Tuple
 
+import numpy as np
 from PIL import Image
 from torchvision.transforms import functional as F
 
@@ -12,9 +13,12 @@ class InvNormalize(object):
         self.inplace = inplace
 
     def __call__(self, tensor):
-        mean = -self.mean / self.std
-        std = 1.0 / self.std
-        return F.normalize(tensor, mean, std, self.inplace)
+        mean = np.array(self.mean, dtype=np.float32)
+        std = np.array(self.std, dtype=np.float32)
+
+        inv_mean = -mean / std
+        inv_std = 1.0 / std
+        return F.normalize(tensor, inv_mean.tolist(), inv_std.tolist(), self.inplace)
 
     def __repr__(self):
         return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
