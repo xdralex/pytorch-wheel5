@@ -1,7 +1,7 @@
 import logging
 import math
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Union, List
+from typing import Dict, Optional, Union, List, NamedTuple
 
 import numpy as np
 import torch
@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from . import cuda
-from .metrics import AverageMeter, AccuracyMeter, ArrayAccumMeter
+from .metrics import AverageMeter, AccuracyMeter, ArrayAccumMeter, ReservoirSamplingMeter
 from .tracking import TrialTracker, FitState
 
 
@@ -34,10 +34,21 @@ class EpochHandler(ABC):
         pass
 
 
+class Sample(NamedTuple):
+    x: Tensor
+    y: Tensor
+    y_probs: Tensor
+    y_hat: Tensor
+    indices: Tensor
+
+
 class TrainEvalEpochHandler(EpochHandler):
-    def __init__(self, kind, num_epochs):
+    def __init__(self, kind, num_epochs, sampled_epochs=-1, samples=8):
         self.loss_meter = AverageMeter()
         self.acc_meter = AccuracyMeter()
+
+        self.sampled_epochs = sampled_epochs
+        self.samples_meter = ReservoirSamplingMeter(k=samples)
 
         self.kind = kind
         self.epoch = 0
@@ -55,6 +66,8 @@ class TrainEvalEpochHandler(EpochHandler):
         self.loss_meter.reset()
         self.acc_meter.reset()
 
+        self.samples_meter.reset()
+
         self._state_repr = f'{self._prefix()} - loss=?, acc=?'
 
     def batch_processed(self, x: Tensor, y: Tensor, y_probs: Tensor, y_hat: Tensor, loss_value: Tensor, indices: Tensor):
@@ -66,6 +79,20 @@ class TrainEvalEpochHandler(EpochHandler):
 
         batch_loss = self.loss_meter.add(float(loss_value))
         batch_acc = self.acc_meter.add(batch_correct, batch_total)
+
+        if self.epoch <= self.sampled_epochs:
+            elements = []
+
+            x_cpu = x.cpu()
+            y_cpu = y.cpu()
+            y_probs_cpu = y_probs.cpu()
+            y_hat_cpu = y_hat.cpu()
+            indices_cpu = indices.cpu()
+
+            for i in range(0, y.shape[0]):
+                sample = Sample(x=x_cpu[i], y=y_cpu[i], y_probs=y_probs_cpu[i], y_hat=y_hat_cpu[i], indices=indices_cpu[i])
+                elements.append(sample)
+            self.samples_meter.add(elements)
 
         self._state_repr = f'{self._prefix()} - loss={batch_loss:.6f}, acc={batch_acc:.3f}'
 
@@ -137,11 +164,13 @@ def fit(device: Union[torch.device, int],
         optimizer: Optimizer,
         num_epochs: int,
         tracker: Optional[TrialTracker] = None,
-        display_progress: bool = True):
+        display_progress: bool = True,
+        sampled_epochs=0,
+        samples=8):
 
     # Dummy scoring
-    dummy_train_handler = TrainEvalEpochHandler('dummy-train', num_epochs=1)
-    dummy_val_handler = TrainEvalEpochHandler('dummy-val', num_epochs=1)
+    dummy_train_handler = TrainEvalEpochHandler('dummy-train', num_epochs=1, sampled_epochs=sampled_epochs + 1, samples=samples)
+    dummy_val_handler = TrainEvalEpochHandler('dummy-val', num_epochs=1, sampled_epochs=sampled_epochs + 1, samples=samples)
 
     dummy_train_metrics = run_epoch(device, model, train_loader, loss, None, dummy_train_handler, display_progress=display_progress)
     dummy_val_metrics = run_epoch(device, model, val_loader, loss, None, dummy_val_handler, display_progress=display_progress)
@@ -153,11 +182,13 @@ def fit(device: Union[torch.device, int],
                                          epoch=0,
                                          num_epochs=num_epochs,
                                          train_metrics=dummy_train_metrics,
-                                         val_metrics=dummy_val_metrics))
+                                         val_metrics=dummy_val_metrics),
+                                train_samples=dummy_train_handler.samples_meter.value(),
+                                val_samples=dummy_val_handler.samples_meter.value())
 
     # Training
-    train_handler = TrainEvalEpochHandler('train', num_epochs)
-    val_handler = TrainEvalEpochHandler('val', num_epochs)
+    train_handler = TrainEvalEpochHandler('train', num_epochs, sampled_epochs=sampled_epochs, samples=samples)
+    val_handler = TrainEvalEpochHandler('val', num_epochs, sampled_epochs=sampled_epochs, samples=samples)
 
     for epoch in range(1, num_epochs + 1):
         train_metrics = run_epoch(device, model, train_loader, loss, optimizer, train_handler, display_progress=display_progress)
@@ -170,7 +201,9 @@ def fit(device: Union[torch.device, int],
                                              epoch=epoch,
                                              num_epochs=num_epochs,
                                              train_metrics=train_metrics,
-                                             val_metrics=val_metrics))
+                                             val_metrics=val_metrics),
+                                    train_samples=train_handler.samples_meter.value(),
+                                    val_samples=val_handler.samples_meter.value())
 
 
 def score(device: Union[torch.device, int],

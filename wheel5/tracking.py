@@ -6,7 +6,7 @@ import os
 import pathlib
 import re
 from abc import ABC, abstractmethod
-from typing import Dict, Union, Optional, List, NamedTuple
+from typing import Dict, Union, Optional, List, NamedTuple, Callable
 
 import pandas as pd
 import torch
@@ -69,13 +69,20 @@ class SnapshotConfig(NamedTuple):
 class TensorboardConfig(NamedTuple):
     root_dir: str
     track_weights: bool
+    track_samples: bool
 
 
 class Tracker(object):
-    def __init__(self, snapshot_cfg: SnapshotConfig, tensorboard_cfg: TensorboardConfig, experiment: str):
+    def __init__(self,
+                 snapshot_cfg: SnapshotConfig,
+                 tensorboard_cfg: TensorboardConfig,
+                 experiment: str,
+                 sample_img_transform: Optional[Callable[[torch.Tensor], torch.Tensor]]):
+
         self.snapshot_cfg = snapshot_cfg
         self.tensorboard_cfg = tensorboard_cfg
         self.experiment = experiment
+        self.sample_img_transform = sample_img_transform
 
     @property
     def snapshot_dir(self) -> str:
@@ -93,7 +100,7 @@ class Tracker(object):
         else:
             trial = f'{Tracker.dict_to_key(hparams)}-{date_str}'
 
-        return TrialTracker(self.snapshot_cfg, self.tensorboard_cfg, self.experiment, trial, hparams)
+        return TrialTracker(self.snapshot_cfg, self.tensorboard_cfg, self.experiment, trial, hparams, self.sample_img_transform)
 
     @staticmethod
     def dict_to_key(hparams: Dict[str, float]) -> str:
@@ -125,8 +132,13 @@ class Tracker(object):
 
 
 class TrialTracker(object):
-    def __init__(self, snapshot_cfg: SnapshotConfig, tensorboard_cfg: TensorboardConfig, experiment: str, trial: str,
-                 hparams: Optional[Dict[str, float]]):
+    def __init__(self, snapshot_cfg: SnapshotConfig,
+                 tensorboard_cfg: TensorboardConfig,
+                 experiment: str,
+                 trial: str,
+                 hparams: Optional[Dict[str, float]],
+                 sample_img_transform: Optional[Callable[[torch.Tensor], torch.Tensor]]):
+
         self.logger = logging.getLogger(f'{__name__}.{self.__class__.__name__}')
 
         self.snapshot_cfg = snapshot_cfg
@@ -134,6 +146,8 @@ class TrialTracker(object):
         self.experiment = experiment
         self.trial = trial
         self.hparams = hparams or {}
+
+        self.sample_img_transform = sample_img_transform or (lambda x: x)
 
         self.tensorboard_dir = os.path.join(tensorboard_cfg.root_dir, experiment, trial)
         pathlib.Path(self.tensorboard_dir).mkdir(parents=True, exist_ok=True)
@@ -151,7 +165,7 @@ class TrialTracker(object):
         with open(os.path.join(self.snapshot_dir, 'hyperparameters.json'), 'x') as f:
             json.dump(hparams, f, indent=2)
 
-    def epoch_completed(self, state: FitState):
+    def epoch_completed(self, state: FitState, train_samples, val_samples):
         # TensorBoard
         for k, v in state.train_metrics.items():
             self.tb_writer.add_scalar(f'fit/train/{k}', v, state.epoch)
@@ -164,6 +178,15 @@ class TrialTracker(object):
         if self.tensorboard_cfg.track_weights:
             for name, param in state.model.named_parameters():
                 self.tb_writer.add_histogram(f'weights/{name}', param, state.epoch)
+
+        def write_samples(samples, samples_name: str):
+            if  self.tensorboard_cfg.track_samples and len(samples) > 0:
+                x = torch.stack([self.sample_img_transform(s.x) for s in samples])
+                self.tb_writer.add_images(f'samples_x/{samples_name}', x, state.epoch)
+
+        write_samples(train_samples, 'train')
+        write_samples(val_samples, 'val')
+
 
         self.tb_writer.flush()
 
