@@ -1,7 +1,7 @@
 import logging
-from logging.config import dictConfig
 import os
 import pathlib
+from logging.config import dictConfig
 
 
 class BetterFileHandler(logging.FileHandler):

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
+from collections import deque
 from enum import Enum
 from typing import NamedTuple, List, Dict, Set, Optional, Callable, Tuple, Iterable
-from collections import deque
 
 import torch
 from graphviz import Digraph

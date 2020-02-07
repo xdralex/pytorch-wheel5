@@ -1,15 +1,13 @@
 from typing import List, Optional
 
+import matplotlib as mpl
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 from PIL.Image import Image
 from numpy.random.mtrand import RandomState
 from sklearn.metrics import confusion_matrix
-
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-import seaborn as sns
-
 from torch.utils.data import Dataset
 
 
