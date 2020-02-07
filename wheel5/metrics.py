@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 
 import torch
+from numpy.random.mtrand import RandomState
 from torch import Tensor
 
 
@@ -150,3 +151,30 @@ class ArrayAccumMeter(Meter):
 
     def value(self):
         return torch.cat(self.accum)
+
+
+class ReservoirSamplingMeter(Meter):
+    def __init__(self, k, random_state: RandomState = None):
+        self.k = k
+        self.random_state = random_state or RandomState()
+
+        self.accum = []
+        self.counter = 0
+
+    def add(self, elements):
+        for element in elements:
+            if len(self.accum) < self.k:
+                self.accum.append(element)
+            else:
+                r = self.random_state.randint(0, self.counter + 1)
+                if r < self.k:
+                    self.accum[r] = element
+
+            self.counter += 1
+
+    def reset(self):
+        self.accum = []
+        self.counter = 0
+
+    def value(self):
+        return self.accum
