@@ -1,7 +1,8 @@
+import hashlib
 import os
 import pathlib
 from struct import pack, unpack
-from typing import Callable, Tuple, List, Optional, NamedTuple, Any
+from typing import Callable, Tuple, Any
 
 import albumentations as albu
 import lmdb
@@ -9,11 +10,8 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 from PIL.Image import Image as Img
-from numpy.random.mtrand import RandomState
-from torch.utils.data import Dataset, DataLoader
-
 from pandas.util import hash_pandas_object
-import hashlib
+from torch.utils.data import Dataset, Sampler
 
 
 class LMDBImageDataset(Dataset):
@@ -145,18 +143,12 @@ class AlbumentationsDataset(TransformDataset):
         super(AlbumentationsDataset, self).__init__(wrapped, callable_transform)
 
 
-class DataBundle(NamedTuple):
-    loader: DataLoader
-    dataset: Dataset
-    indices: List[int]
+class SequentialSubsetSampler(Sampler):
+    def __init__(self, indices):
+        self.indices = indices
 
+    def __iter__(self):
+        return iter(self.indices)
 
-def split_indices(indices: List[int], split: float, random_state: Optional[RandomState] = None) -> (List[int], List[int]):
-    if random_state is None:
-        random_state = np.random.RandomState()
-
-    shuffled_indices = indices.copy()
-    random_state.shuffle(shuffled_indices)
-
-    divider = int(np.round(split * len(indices)))
-    return shuffled_indices[:divider], shuffled_indices[divider:]
+    def __len__(self):
+        return len(self.indices)
