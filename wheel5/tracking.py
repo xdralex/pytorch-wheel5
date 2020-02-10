@@ -118,13 +118,35 @@ class Tracker(object):
         return '-'.join([f'{k}_{format_float(v)}' for k, v in hparams.items()])
 
     @staticmethod
-    def load_stats(snapshot_cfg: SnapshotConfig, experiment: str) -> Optional[pd.DataFrame]:
+    def load_experiment_stats(snapshot_cfg: SnapshotConfig) -> pd.DataFrame:
+        entries = []
+
+        for experiment in os.listdir(snapshot_cfg.root_dir):
+            experiment_dir = os.path.join(snapshot_cfg.root_dir, experiment)
+
+            total_trials = 0
+            completed_trials = 0
+
+            if os.path.isdir(experiment_dir):
+                for trial in os.listdir(experiment_dir):
+                    trial_dir = os.path.join(experiment_dir, trial)
+
+                    if os.path.isdir(trial_dir):
+                        total_trials += 1
+                        completed_trials += (1 if os.path.exists(os.path.join(trial_dir, '.completed')) else 0)
+
+            entries.append({'experiment': experiment, 'trials': total_trials, 'completed': completed_trials})
+
+        return pd.DataFrame(data=entries)
+
+    @staticmethod
+    def load_trial_stats(snapshot_cfg: SnapshotConfig, experiment: str) -> Optional[pd.DataFrame]:
         experiment_df = None
 
         directory = os.path.join(snapshot_cfg.root_dir, experiment)
         for trial in os.listdir(directory):
             if os.path.isdir(os.path.join(directory, trial)):
-                trial_df = TrialTracker.load_stats(snapshot_cfg, experiment, trial)
+                trial_df = TrialTracker.load_trial_stats(snapshot_cfg, experiment, trial)
 
                 if trial_df is not None:
                     if experiment_df is not None:
@@ -240,7 +262,7 @@ class TrialTracker(object):
             f.write(f'{datetime.datetime.now():%Y-%m-%d_%H:%M:%S.%f}\n')
 
     @staticmethod
-    def load_stats(snapshot_cfg: SnapshotConfig, experiment: str, trial: str, load_hparams: bool = True, complete_only: bool = True) -> Optional[pd.DataFrame]:
+    def load_trial_stats(snapshot_cfg: SnapshotConfig, experiment: str, trial: str, load_hparams: bool = True, complete_only: bool = True) -> Optional[pd.DataFrame]:
         directory = os.path.join(snapshot_cfg.root_dir, experiment, trial)
 
         if complete_only:
