@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from . import cuda
-from .metrics import AverageMeter, AccuracyMeter, ArrayAccumMeter, ReservoirSamplingMeter, LimitedSamplingMeter
+from .metrics import AverageMeter, AccuracyMeter, ArrayAccumMeter, ReservoirSamplingMeter, LimitedSamplingMeter, LastMeter
 from .tracking import TrialTracker, FitState
 
 
@@ -72,7 +72,7 @@ class TrainEvalEpochHandler(EpochHandler):
 
         self._state_repr = f'{self._prefix()} - loss=?, acc=?'
 
-    def batch_processed(self, x: Tensor, y: Tensor, y_probs: Tensor, y_hat: Tensor, loss_value: Tensor, indices: Tensor):
+    def batch_processed(self, x: Tensor, y: Tensor, y_probs: Tensor, y_hat: Tensor, loss_value: Optional[Tensor], indices: Tensor):
         assert 0 < self.epoch <= self.num_epochs
         assert self.in_epoch
 
@@ -167,6 +167,7 @@ def fit(device: Union[torch.device, int],
         ctrl_loader: DataLoader,
         loss: Module,
         optimizer: Optimizer,
+        group_names: List[str],
         num_epochs: int,
         tracker: Optional[TrialTracker] = None,
         display_progress: bool = True,
@@ -193,7 +194,8 @@ def fit(device: Union[torch.device, int],
                                          ctrl_metrics=dummy_ctrl_metrics),
                                 train_samples=dummy_train_handler.random_samples_meter.value(),
                                 val_samples=dummy_val_handler.random_samples_meter.value(),
-                                ctrl_samples=dummy_ctrl_handler.fixed_samples_meter.value())
+                                ctrl_samples=dummy_ctrl_handler.fixed_samples_meter.value(),
+                                optimizer_group_names=group_names)
 
     # Training
     train_handler = TrainEvalEpochHandler('train', num_epochs, sampled_epochs=sampled_epochs, samples=samples)
@@ -216,7 +218,8 @@ def fit(device: Union[torch.device, int],
                                              ctrl_metrics=ctrl_metrics),
                                     train_samples=train_handler.random_samples_meter.value(),
                                     val_samples=val_handler.random_samples_meter.value(),
-                                    ctrl_samples=ctrl_handler.fixed_samples_meter.value())
+                                    ctrl_samples=ctrl_handler.fixed_samples_meter.value(),
+                                    optimizer_group_names=group_names)
 
 
 def score(device: Union[torch.device, int],

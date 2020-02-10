@@ -191,7 +191,7 @@ class TrialTracker(object):
         with open(os.path.join(self.snapshot_dir, 'hyperparameters.json'), 'x') as f:
             json.dump(hparams, f, indent=2)
 
-    def epoch_completed(self, state: FitState, train_samples, val_samples, ctrl_samples):
+    def epoch_completed(self, state: FitState, train_samples, val_samples, ctrl_samples, optimizer_group_names: List[str]):
         # TensorBoard
         for k, v in state.train_metrics.items():
             self.tb_writer.add_scalar(f'fit/train/{k}', v, state.epoch)
@@ -227,6 +227,15 @@ class TrialTracker(object):
             write_samples(train_samples, 'train')
             write_samples(val_samples, 'val')
             write_samples(ctrl_samples, 'ctrl')
+
+        for index, param_group in enumerate(state.optimizer.param_groups):
+            for k, v in param_group.items():
+                if k == 'lr':
+                    try:
+                        v = float(v)    # learning rate should be float!
+                        self.tb_writer.add_scalar(f'optim/{k}/{optimizer_group_names[index]}', v, state.epoch)
+                    except ValueError:
+                        pass
 
         self.tb_writer.flush()
 
