@@ -1,7 +1,7 @@
 import logging
 import math
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Union, List, NamedTuple
+from typing import Dict, Optional, Union, List, NamedTuple, Any
 
 import numpy as np
 import torch
@@ -167,6 +167,7 @@ def fit(device: Union[torch.device, int],
         ctrl_loader: DataLoader,
         loss: Module,
         optimizer: Optimizer,
+        scheduler: Optional[Any],
         group_names: List[str],
         num_epochs: int,
         tracker: Optional[TrialTracker] = None,
@@ -179,9 +180,9 @@ def fit(device: Union[torch.device, int],
     dummy_val_handler = TrainEvalEpochHandler('dummy-val', num_epochs=1, sampled_epochs=sampled_epochs + 1, samples=samples)
     dummy_ctrl_handler = TrainEvalEpochHandler('dummy-ctrl', num_epochs=1, sampled_epochs=sampled_epochs + 1, samples=samples)
 
-    dummy_train_metrics = run_epoch(device, model, train_loader, loss, None, dummy_train_handler, display_progress=display_progress)
-    dummy_val_metrics = run_epoch(device, model, val_loader, loss, None, dummy_val_handler, display_progress=display_progress)
-    dummy_ctrl_metrics = run_epoch(device, model, ctrl_loader, loss, None, dummy_ctrl_handler, display_progress=display_progress)
+    dummy_train_metrics = run_epoch(device, model, train_loader, loss, None, None, dummy_train_handler, display_progress=display_progress)
+    dummy_val_metrics = run_epoch(device, model, val_loader, loss, None, None, dummy_val_handler, display_progress=display_progress)
+    dummy_ctrl_metrics = run_epoch(device, model, ctrl_loader, loss, None, None, dummy_ctrl_handler, display_progress=display_progress)
 
     if tracker:
         tracker.epoch_completed(FitState(model=model,
@@ -203,9 +204,9 @@ def fit(device: Union[torch.device, int],
     ctrl_handler = TrainEvalEpochHandler('ctrl', num_epochs, sampled_epochs=sampled_epochs, samples=samples)
 
     for epoch in range(1, num_epochs + 1):
-        train_metrics = run_epoch(device, model, train_loader, loss, optimizer, train_handler, display_progress=display_progress)
-        val_metrics = run_epoch(device, model, val_loader, loss, None, val_handler, display_progress=display_progress)
-        ctrl_metrics = run_epoch(device, model, ctrl_loader, loss, None, ctrl_handler, display_progress=display_progress)
+        train_metrics = run_epoch(device, model, train_loader, loss, optimizer, scheduler, train_handler, display_progress=display_progress)
+        val_metrics = run_epoch(device, model, val_loader, loss, None, None, val_handler, display_progress=display_progress)
+        ctrl_metrics = run_epoch(device, model, ctrl_loader, loss, None, None, ctrl_handler, display_progress=display_progress)
 
         if tracker:
             tracker.epoch_completed(FitState(model=model,
@@ -287,6 +288,7 @@ def run_epoch(device: Union[torch.device, int],
               loader: DataLoader,
               loss: Optional[Module],
               optimizer: Optional[Optimizer],
+              scheduler: Optional[Any],
               handler: EpochHandler,
               display_progress: bool = True):
     logger = logging.getLogger(f'{__name__}.run_epoch')
@@ -337,6 +339,10 @@ def run_epoch(device: Union[torch.device, int],
                 progress_bar.set_description(handler.state_repr())
 
                 log_status('    finished batch')
+
+            if scheduler is not None:
+                scheduler.step()
+                log_status('stepped scheduler')
 
             metrics = handler.epoch_finished()
             progress_bar.set_description(handler.state_repr())
