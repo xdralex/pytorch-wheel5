@@ -229,7 +229,7 @@ def score(device: Union[torch.device, int],
           loss: Module,
           display_progress: bool = True) -> Dict[str, Union[int, float]]:
     handler = TrainEvalEpochHandler('score', num_epochs=1)
-    return run_epoch(device, model, loader, loss, None, handler, display_progress=display_progress)
+    return run_epoch(device, model, loader, loss, None, None, handler, display_progress=display_progress)
 
 
 def score_blend(device: Union[torch.device, int],
@@ -246,7 +246,7 @@ def score_blend(device: Union[torch.device, int],
         model_device = model.to(device)
 
         handler = PredictEpochHandler()
-        results = run_epoch(device, model_device, loader, None, None, handler, display_progress=display_progress)
+        results = run_epoch(device, model_device, loader, None, None, None, handler, display_progress=display_progress)
 
         order = torch.argsort(results['indices'])
         y_ordered = torch.index_select(results['y'], dim=0, index=order)
@@ -280,7 +280,7 @@ def predict(device: Union[torch.device, int],
             loader: DataLoader,
             display_progress: bool = True) -> Dict[str, Tensor]:
     handler = PredictEpochHandler()
-    return run_epoch(device, model, loader, None, None, handler, display_progress=display_progress)
+    return run_epoch(device, model, loader, None, None, None, handler, display_progress=display_progress)
 
 
 def run_epoch(device: Union[torch.device, int],

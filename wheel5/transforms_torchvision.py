@@ -3,6 +3,7 @@ from typing import Union, Tuple
 
 import numpy as np
 from PIL import Image
+from torch import Tensor
 from torchvision.transforms import functional as F
 
 
@@ -12,7 +13,7 @@ class InvNormalize(object):
         self.std = std
         self.inplace = inplace
 
-    def __call__(self, tensor):
+    def __call__(self, tensor: Tensor):
         mean = np.array(self.mean, dtype=np.float32)
         std = np.array(self.std, dtype=np.float32)
 
