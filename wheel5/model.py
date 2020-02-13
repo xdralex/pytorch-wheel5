@@ -216,6 +216,7 @@ def fit(device: Union[torch.device, int],
                                     ctrl_samples=ctrl_handler.fixed_samples_meter.value(),
                                     classes=classes,
                                     prediction=prediction,
+                                    prediction_dataset=val_loader.dataset,
                                     optimizer_group_names=group_names)
 
 

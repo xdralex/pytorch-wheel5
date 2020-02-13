@@ -81,7 +81,7 @@ def visualize_cm(classes: List[str], y_true: np.ndarray, y_pred: np.ndarray,
 
 def visualize_top_errors(classes: List[str], y_true: np.ndarray, y_pred: np.ndarray,
                          image_indices: np.ndarray, image_dataset: Dataset,
-                         top: int = 5, examples: int = 4,
+                         top: int = 5, examples: int = 5,
                          width: float = 3, height: float = 3, fontsize: int = 8, titlesize: int = 12,
                          random_state: RandomState = None) -> List[Figure]:
     random_state = random_state or np.random.RandomState()
@@ -149,10 +149,10 @@ def _visualize_error_row(df_samples: pd.DataFrame, value: float, true_v: int, pr
     fig.suptitle(f'{value:.2%} - actual: {classes[true_v]}, predicted: {classes[pred_v]}', fontsize=titlesize)
 
     for counter, index in enumerate(filtered_indices):
-        image, cls, name, _ = image_dataset[index]
+        image, target, _ = image_dataset[index]
 
         plt.subplot(1, examples, counter + 1)
-        plt.title(f'#{index} - [{cls}] {name}', fontsize=fontsize)
+        plt.title(f'#{index} - [{target}] {classes[target]}', fontsize=fontsize)
         plt.imshow(image)
         plt.grid(False)
         plt.axis('off')

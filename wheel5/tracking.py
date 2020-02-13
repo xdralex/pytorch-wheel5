@@ -13,9 +13,12 @@ import torch
 from tabulate import tabulate
 from torch.nn import Module
 from torch.optim.optimizer import Optimizer
+from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
+from torchvision.transforms import ToPILImage
 
-from .visualization import visualize_cm
+from .dataset import TransformDataset
+from .visualization import visualize_cm, visualize_top_errors
 
 
 # TODO: use state_dict() to serialize model/optimizer
@@ -202,6 +205,7 @@ class TrialTracker(object):
                         ctrl_samples,
                         classes: List[str],
                         prediction: Optional[Dict[str, torch.Tensor]],
+                        prediction_dataset: Dataset,
                         optimizer_group_names: List[str]):
 
         # TensorBoard
@@ -242,8 +246,22 @@ class TrialTracker(object):
 
         if self.tensorboard_cfg.track_predictions:
             if prediction is not None:
-                cm = visualize_cm(classes, y_true=prediction['y'].numpy(), y_pred=prediction['y_hat'].numpy())
-                self.tb_writer.add_figure(f'predictions/cm', cm, state.epoch)
+                cm_fig = visualize_cm(classes, y_true=prediction['y'].numpy(), y_pred=prediction['y_hat'].numpy())
+                self.tb_writer.add_figure(f'predictions/cm', cm_fig, state.epoch)
+
+                pil_image_transform = ToPILImage()
+
+                def viz_transform(x):
+                    return pil_image_transform(self.sample_img_transform(x))
+
+                mismatch_figs = visualize_top_errors(classes,
+                                                     y_true=prediction['y'].numpy(),
+                                                     y_pred=prediction['y_hat'].numpy(),
+                                                     image_indices=prediction['indices'].numpy(),
+                                                     image_dataset=TransformDataset(prediction_dataset, viz_transform))
+
+                for i, mismatch_fig in enumerate(mismatch_figs):
+                    self.tb_writer.add_figure(f'predictions/mismatch/{i}', mismatch_fig, state.epoch)
 
         for index, param_group in enumerate(state.optimizer.param_groups):
             for k, v in param_group.items():
