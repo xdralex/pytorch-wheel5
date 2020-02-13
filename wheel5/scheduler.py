@@ -15,6 +15,7 @@ class WarmupScheduler(_LRScheduler):
 
     def step(self, epoch=None):
         if self.last_epoch > self.epochs:
-            return self.next_scheduler.step(epoch - self.epochs)
+            epoch = None if epoch is None else epoch - self.epochs
+            return self.next_scheduler.step(epoch)
         else:
             return super(WarmupScheduler, self).step(epoch)
