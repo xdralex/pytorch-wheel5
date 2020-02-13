@@ -220,8 +220,8 @@ class TrialTracker(object):
                     y_strs.append(f'y={float(s.y):.3f}, y_hat={float(s.y_hat):.3f}, y_probs={arr2str(s.y_probs)}')
                 y_text = '  \n'.join(y_strs)
 
-                self.tb_writer.add_images(f'samples_x/{samples_name}', x, state.epoch)
-                self.tb_writer.add_text(f'samples_y/{samples_name}', y_text, state.epoch)
+                self.tb_writer.add_images(f'samples/x/{samples_name}', x, state.epoch)
+                self.tb_writer.add_text(f'samples/y/{samples_name}', y_text, state.epoch)
 
         if self.tensorboard_cfg.track_samples:
             write_samples(train_samples, 'train')
