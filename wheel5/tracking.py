@@ -15,6 +15,8 @@ from torch.nn import Module
 from torch.optim.optimizer import Optimizer
 from torch.utils.tensorboard import SummaryWriter
 
+from .visualization import visualize_cm
+
 
 # TODO: use state_dict() to serialize model/optimizer
 class FitState(object):
@@ -74,6 +76,7 @@ class TensorboardConfig(NamedTuple):
     root_dir: str
     track_weights: bool
     track_samples: bool
+    track_predictions: bool
 
 
 class Tracker(object):
@@ -158,7 +161,8 @@ class Tracker(object):
 
 
 class TrialTracker(object):
-    def __init__(self, snapshot_cfg: SnapshotConfig,
+    def __init__(self,
+                 snapshot_cfg: SnapshotConfig,
                  tensorboard_cfg: TensorboardConfig,
                  experiment: str,
                  trial: str,
@@ -191,7 +195,15 @@ class TrialTracker(object):
         with open(os.path.join(self.snapshot_dir, 'hyperparameters.json'), 'x') as f:
             json.dump(hparams, f, indent=2)
 
-    def epoch_completed(self, state: FitState, train_samples, val_samples, ctrl_samples, optimizer_group_names: List[str]):
+    def epoch_completed(self,
+                        state: FitState,
+                        train_samples,
+                        val_samples,
+                        ctrl_samples,
+                        classes: List[str],
+                        prediction: Optional[Dict[str, torch.Tensor]],
+                        optimizer_group_names: List[str]):
+
         # TensorBoard
         for k, v in state.train_metrics.items():
             self.tb_writer.add_scalar(f'fit/train/{k}', v, state.epoch)
@@ -227,6 +239,11 @@ class TrialTracker(object):
             write_samples(train_samples, 'train')
             write_samples(val_samples, 'val')
             write_samples(ctrl_samples, 'ctrl')
+
+        if self.tensorboard_cfg.track_predictions:
+            if prediction is not None:
+                cm = visualize_cm(classes, y_true=prediction['y'].numpy(), y_pred=prediction['y_hat'].numpy())
+                self.tb_writer.add_figure(f'predictions/cm', cm, state.epoch)
 
         for index, param_group in enumerate(state.optimizer.param_groups):
             for k, v in param_group.items():

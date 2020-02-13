@@ -162,6 +162,7 @@ class PredictEpochHandler(EpochHandler):
 
 def fit(device: Union[torch.device, int],
         model: Module,
+        classes: List[str],
         train_loader: DataLoader,
         val_loader: DataLoader,
         ctrl_loader: DataLoader,
@@ -175,38 +176,31 @@ def fit(device: Union[torch.device, int],
         sampled_epochs=0,
         samples=8):
 
-    # Dummy scoring
     dummy_train_handler = TrainEvalEpochHandler('dummy-train', num_epochs=1, sampled_epochs=sampled_epochs + 1, samples=samples)
     dummy_val_handler = TrainEvalEpochHandler('dummy-val', num_epochs=1, sampled_epochs=sampled_epochs + 1, samples=samples)
     dummy_ctrl_handler = TrainEvalEpochHandler('dummy-ctrl', num_epochs=1, sampled_epochs=sampled_epochs + 1, samples=samples)
 
-    dummy_train_metrics = run_epoch(device, model, train_loader, loss, None, None, dummy_train_handler, display_progress=display_progress)
-    dummy_val_metrics = run_epoch(device, model, val_loader, loss, None, None, dummy_val_handler, display_progress=display_progress)
-    dummy_ctrl_metrics = run_epoch(device, model, ctrl_loader, loss, None, None, dummy_ctrl_handler, display_progress=display_progress)
+    main_train_handler = TrainEvalEpochHandler('train', num_epochs, sampled_epochs=sampled_epochs, samples=samples)
+    main_val_handler = TrainEvalEpochHandler('val', num_epochs, sampled_epochs=sampled_epochs, samples=samples)
+    main_ctrl_handler = TrainEvalEpochHandler('ctrl', num_epochs, sampled_epochs=sampled_epochs, samples=samples)
 
-    if tracker:
-        tracker.epoch_completed(FitState(model=model,
-                                         loss=loss,
-                                         optimizer=optimizer,
-                                         epoch=0,
-                                         num_epochs=num_epochs,
-                                         train_metrics=dummy_train_metrics,
-                                         val_metrics=dummy_val_metrics,
-                                         ctrl_metrics=dummy_ctrl_metrics),
-                                train_samples=dummy_train_handler.random_samples_meter.value(),
-                                val_samples=dummy_val_handler.random_samples_meter.value(),
-                                ctrl_samples=dummy_ctrl_handler.fixed_samples_meter.value(),
-                                optimizer_group_names=group_names)
+    for epoch in range(0, num_epochs + 1):
+        if epoch == 0:
+            train_handler, val_handler, ctrl_handler = dummy_train_handler, dummy_val_handler, dummy_ctrl_handler
+            train_optimizer, train_scheduler = None, None
+        else:
+            train_handler, val_handler, ctrl_handler = main_train_handler, main_val_handler, main_ctrl_handler
+            train_optimizer, train_scheduler = optimizer, scheduler
 
-    # Training
-    train_handler = TrainEvalEpochHandler('train', num_epochs, sampled_epochs=sampled_epochs, samples=samples)
-    val_handler = TrainEvalEpochHandler('val', num_epochs, sampled_epochs=sampled_epochs, samples=samples)
-    ctrl_handler = TrainEvalEpochHandler('ctrl', num_epochs, sampled_epochs=sampled_epochs, samples=samples)
-
-    for epoch in range(1, num_epochs + 1):
-        train_metrics = run_epoch(device, model, train_loader, loss, optimizer, scheduler, train_handler, display_progress=display_progress)
+        train_metrics = run_epoch(device, model, train_loader, loss, train_optimizer, train_scheduler, train_handler, display_progress=display_progress)
         val_metrics = run_epoch(device, model, val_loader, loss, None, None, val_handler, display_progress=display_progress)
         ctrl_metrics = run_epoch(device, model, ctrl_loader, loss, None, None, ctrl_handler, display_progress=display_progress)
+
+        if tracker.tensorboard_cfg.track_predictions:
+            predict_handler = PredictEpochHandler()
+            prediction = run_epoch(device, model, val_loader, None, None, None, predict_handler, display_progress=display_progress)
+        else:
+            prediction = None
 
         if tracker:
             tracker.epoch_completed(FitState(model=model,
@@ -220,6 +214,8 @@ def fit(device: Union[torch.device, int],
                                     train_samples=train_handler.random_samples_meter.value(),
                                     val_samples=val_handler.random_samples_meter.value(),
                                     ctrl_samples=ctrl_handler.fixed_samples_meter.value(),
+                                    classes=classes,
+                                    prediction=prediction,
                                     optimizer_group_names=group_names)
 
 

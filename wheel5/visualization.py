@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from PIL.Image import Image
+from matplotlib.figure import Figure
 from numpy.random.mtrand import RandomState
 from sklearn.metrics import confusion_matrix
 from torch.utils.data import Dataset
@@ -32,13 +33,13 @@ def direct_display_image(image: Image, title: Optional[str] = None, titlesize=12
 def visualize_samples(dataset: Dataset,
                       cols: int, rows: int,
                       width: float = 3, height: float = 3, fontsize: int = 8,
-                      random_state: RandomState = None):
+                      random_state: RandomState = None) -> Figure:
     random_state = random_state or np.random.RandomState()
 
     count = cols * rows
     indices = random_state.choice(np.arange(len(dataset)), count, replace=False)
 
-    plt.figure(figsize=(cols * width, rows * height))
+    fig = plt.figure(figsize=(cols * width, rows * height))
 
     for i, index in enumerate(indices):
         image, cls, name, _ = dataset[index]
@@ -49,15 +50,17 @@ def visualize_samples(dataset: Dataset,
         plt.grid(False)
         plt.axis('off')
 
+    return fig
+
 
 def visualize_cm(classes: List[str], y_true: np.ndarray, y_pred: np.ndarray,
-                 cellsize: float = 0.6, fontsize: int = 7):
+                 cellsize: float = 0.6, fontsize: int = 7) -> Figure:
     n = len(classes)
 
     cm = confusion_matrix(y_true, y_pred, normalize='all')
     assert cm.shape == (n, n)
 
-    plt.figure(figsize=(n * cellsize, n * cellsize))
+    fig = plt.figure(figsize=(n * cellsize, n * cellsize))
 
     ax = sns.heatmap(cm,
                      cmap='coolwarm',
@@ -73,13 +76,14 @@ def visualize_cm(classes: List[str], y_true: np.ndarray, y_pred: np.ndarray,
     ax.set_xticklabels(classes, fontsize=fontsize, rotation=45, ha='right')
     ax.set_yticklabels(classes, fontsize=fontsize, rotation=45)
 
+    return fig
+
 
 def visualize_top_errors(classes: List[str], y_true: np.ndarray, y_pred: np.ndarray,
                          image_indices: np.ndarray, image_dataset: Dataset,
                          top: int = 5, examples: int = 4,
                          width: float = 3, height: float = 3, fontsize: int = 8, titlesize: int = 12,
-                         random_state: RandomState = None):
-
+                         random_state: RandomState = None) -> List[Figure]:
     random_state = random_state or np.random.RandomState()
 
     n = len(classes)
@@ -96,21 +100,24 @@ def visualize_top_errors(classes: List[str], y_true: np.ndarray, y_pred: np.ndar
 
     df_samples = pd.DataFrame({'y_true': y_true, 'y_pred': y_pred, 'image_index': image_indices})
 
+    figs = []
     for row in df_cm.itertuples():
         value, pred_v, true_v = row.x, row.pred_v, row.true_v
 
-        _visualize_error_row(df_samples, value, true_v, pred_v,
-                             classes, image_dataset, examples,
-                             width, height, fontsize, titlesize,
-                             random_state)
+        fig = _visualize_error_row(df_samples, value, true_v, pred_v,
+                                   classes, image_dataset, examples,
+                                   width, height, fontsize, titlesize,
+                                   random_state)
+        figs.append(fig)
+
+    return figs
 
 
 def visualize_errors(classes: List[str], y_true: np.ndarray, y_pred: np.ndarray, actual_class: str, predicted_class: str,
                      image_indices: np.ndarray, image_dataset: Dataset,
                      examples: int = 4,
                      width: float = 3, height: float = 3, fontsize: int = 8, titlesize: int = 12,
-                     random_state: RandomState = None):
-
+                     random_state: RandomState = None) -> Figure:
     random_state = random_state or np.random.RandomState()
 
     n = len(classes)
@@ -124,17 +131,16 @@ def visualize_errors(classes: List[str], y_true: np.ndarray, y_pred: np.ndarray,
     value = cm[true_v][pred_v]
 
     df_samples = pd.DataFrame({'y_true': y_true, 'y_pred': y_pred, 'image_index': image_indices})
-    _visualize_error_row(df_samples, value, true_v, pred_v,
-                         classes, image_dataset, examples,
-                         width, height, fontsize, titlesize,
-                         random_state)
+    return _visualize_error_row(df_samples, value, true_v, pred_v,
+                                classes, image_dataset, examples,
+                                width, height, fontsize, titlesize,
+                                random_state)
 
 
 def _visualize_error_row(df_samples: pd.DataFrame, value: float, true_v: int, pred_v: int,
                          classes: List[str], image_dataset: Dataset, examples: int,
                          width: float, height: float, fontsize: int, titlesize: int,
-                         random_state: RandomState):
-
+                         random_state: RandomState) -> Figure:
     df_samples_filtered = df_samples[(df_samples['y_true'] == true_v) & (df_samples['y_pred'] == pred_v)]
     df_samples_filtered = df_samples_filtered.sample(frac=1, random_state=random_state)
     filtered_indices = df_samples_filtered.head(examples)['image_index'].tolist()
@@ -150,3 +156,5 @@ def _visualize_error_row(df_samples: pd.DataFrame, value: float, true_v: int, pr
         plt.imshow(image)
         plt.grid(False)
         plt.axis('off')
+
+    return fig
