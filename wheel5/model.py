@@ -8,11 +8,11 @@ import torch
 from torch import Tensor
 from torch.nn import Module
 from torch.optim.optimizer import Optimizer
-from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from . import cuda
-from .metrics import AverageMeter, AccuracyMeter, ArrayAccumMeter, ReservoirSamplingMeter, LimitedSamplingMeter, LastMeter
+from .dataretriever import DataRetriever, DirectDataRetriever
+from .metrics import AverageMeter, AccuracyMeter, ArrayAccumMeter, ReservoirSamplingMeter, LimitedSamplingMeter
 from .tracking import TrialTracker, FitState
 
 
@@ -22,7 +22,7 @@ class EpochHandler(ABC):
         pass
 
     @abstractmethod
-    def batch_processed(self, x: Tensor, y: Tensor, y_probs: Tensor, y_hat: Tensor, loss_value: Optional[Tensor], indices: Tensor):
+    def batch_processed(self, x: Tensor, y: Tensor, y_probs: Tensor, y_hat: Tensor, loss_value: Optional[Tensor], indices: Optional[Tensor]):
         pass
 
     @abstractmethod
@@ -39,7 +39,6 @@ class Sample(NamedTuple):
     y: Tensor
     y_probs: Tensor
     y_hat: Tensor
-    indices: Tensor
 
 
 class TrainEvalEpochHandler(EpochHandler):
@@ -72,7 +71,7 @@ class TrainEvalEpochHandler(EpochHandler):
 
         self._state_repr = f'{self._prefix()} - loss=?, acc=?'
 
-    def batch_processed(self, x: Tensor, y: Tensor, y_probs: Tensor, y_hat: Tensor, loss_value: Optional[Tensor], indices: Tensor):
+    def batch_processed(self, x: Tensor, y: Tensor, y_probs: Tensor, y_hat: Tensor, loss_value: Optional[Tensor], indices: Optional[Tensor]):
         assert 0 < self.epoch <= self.num_epochs
         assert self.in_epoch
 
@@ -89,10 +88,9 @@ class TrainEvalEpochHandler(EpochHandler):
             y_cpu = y.cpu()
             y_probs_cpu = y_probs.cpu()
             y_hat_cpu = y_hat.cpu()
-            indices_cpu = indices.cpu()
 
             for i in range(0, y.shape[0]):
-                sample = Sample(x=x_cpu[i], y=y_cpu[i], y_probs=y_probs_cpu[i], y_hat=y_hat_cpu[i], indices=indices_cpu[i])
+                sample = Sample(x=x_cpu[i], y=y_cpu[i], y_probs=y_probs_cpu[i], y_hat=y_hat_cpu[i])
                 elements.append(sample)
 
             self.random_samples_meter.add(elements)
@@ -163,9 +161,9 @@ class PredictEpochHandler(EpochHandler):
 def fit(device: Union[torch.device, int],
         model: Module,
         classes: List[str],
-        train_loader: DataLoader,
-        val_loader: DataLoader,
-        ctrl_loader: DataLoader,
+        train_retriever: DataRetriever,
+        val_retriever: DirectDataRetriever,
+        ctrl_retriever: DirectDataRetriever,
         loss: Module,
         optimizer: Optimizer,
         scheduler: Optional[Any],
@@ -192,13 +190,13 @@ def fit(device: Union[torch.device, int],
             train_handler, val_handler, ctrl_handler = main_train_handler, main_val_handler, main_ctrl_handler
             train_optimizer, train_scheduler = optimizer, scheduler
 
-        train_metrics = run_epoch(device, model, train_loader, loss, train_optimizer, train_scheduler, train_handler, display_progress=display_progress)
-        val_metrics = run_epoch(device, model, val_loader, loss, None, None, val_handler, display_progress=display_progress)
-        ctrl_metrics = run_epoch(device, model, ctrl_loader, loss, None, None, ctrl_handler, display_progress=display_progress)
+        train_metrics = run_epoch(device, model, train_retriever, loss, train_optimizer, train_scheduler, train_handler, display_progress=display_progress)
+        val_metrics = run_epoch(device, model, val_retriever, loss, None, None, val_handler, display_progress=display_progress)
+        ctrl_metrics = run_epoch(device, model, ctrl_retriever, loss, None, None, ctrl_handler, display_progress=display_progress)
 
         if tracker.tensorboard_cfg.track_predictions:
             predict_handler = PredictEpochHandler()
-            prediction = run_epoch(device, model, val_loader, None, None, None, predict_handler, display_progress=display_progress)
+            prediction = run_epoch(device, model, val_retriever, None, None, None, predict_handler, display_progress=display_progress)
         else:
             prediction = None
 
@@ -216,22 +214,22 @@ def fit(device: Union[torch.device, int],
                                     ctrl_samples=ctrl_handler.fixed_samples_meter.value(),
                                     classes=classes,
                                     prediction=prediction,
-                                    prediction_dataset=val_loader.dataset,
+                                    prediction_dataset=val_retriever.dataset,
                                     optimizer_group_names=group_names)
 
 
 def score(device: Union[torch.device, int],
           model: Module,
-          loader: DataLoader,
+          retriever: DataRetriever,
           loss: Module,
           display_progress: bool = True) -> Dict[str, Union[int, float]]:
     handler = TrainEvalEpochHandler('score', num_epochs=1)
-    return run_epoch(device, model, loader, loss, None, None, handler, display_progress=display_progress)
+    return run_epoch(device, model, retriever, loss, None, None, handler, display_progress=display_progress)
 
 
 def score_blend(device: Union[torch.device, int],
                 models: List[Module],
-                loader: DataLoader,
+                retriever: DirectDataRetriever,
                 loss: Module,
                 display_progress: bool = True) -> Dict[str, Union[int, float]]:
     assert len(models) > 0
@@ -243,7 +241,7 @@ def score_blend(device: Union[torch.device, int],
         model_device = model.to(device)
 
         handler = PredictEpochHandler()
-        results = run_epoch(device, model_device, loader, None, None, None, handler, display_progress=display_progress)
+        results = run_epoch(device, model_device, retriever, None, None, None, handler, display_progress=display_progress)
 
         order = torch.argsort(results['indices'])
         y_ordered = torch.index_select(results['y'], dim=0, index=order)
@@ -274,15 +272,15 @@ def score_blend(device: Union[torch.device, int],
 
 def predict(device: Union[torch.device, int],
             model: Module,
-            loader: DataLoader,
+            retriever: DirectDataRetriever,
             display_progress: bool = True) -> Dict[str, Tensor]:
     handler = PredictEpochHandler()
-    return run_epoch(device, model, loader, None, None, None, handler, display_progress=display_progress)
+    return run_epoch(device, model, retriever, None, None, None, handler, display_progress=display_progress)
 
 
 def run_epoch(device: Union[torch.device, int],
               model: Module,
-              loader: DataLoader,
+              retriever: DataRetriever,
               loss: Optional[Module],
               optimizer: Optional[Optimizer],
               scheduler: Optional[Any],
@@ -295,7 +293,7 @@ def run_epoch(device: Union[torch.device, int],
             stats = cuda.memory_stats(device)
             logger.debug(f'{context} - [{device}] alloc/cache = {stats["allocated"]:.0f} MB / {stats["cached"]:.0f} MB')
 
-    batches_count = math.ceil(len(loader.sampler) / loader.batch_size)
+    batches_count = math.ceil(len(retriever) / retriever.batch_size)
     train_mode = optimizer is not None
 
     model.train(train_mode)
@@ -306,7 +304,7 @@ def run_epoch(device: Union[torch.device, int],
             handler.epoch_started()
             progress_bar.set_description(handler.state_repr())
 
-            for i, (x_cpu, y_cpu, indices) in enumerate(loader):
+            for i, (x_cpu, y_cpu, indices) in enumerate(retriever):
                 log_status('  started batch')
 
                 x = x_cpu.to(device)
