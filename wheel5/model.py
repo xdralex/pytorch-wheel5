@@ -164,7 +164,8 @@ def fit(device: Union[torch.device, int],
         train_retriever: DataRetriever,
         val_retriever: DirectDataRetriever,
         ctrl_retriever: DirectDataRetriever,
-        loss: Module,
+        train_loss: Module,
+        eval_loss: Module,
         optimizer: Optimizer,
         scheduler: Optional[Any],
         group_names: List[str],
@@ -190,9 +191,9 @@ def fit(device: Union[torch.device, int],
             train_handler, val_handler, ctrl_handler = main_train_handler, main_val_handler, main_ctrl_handler
             train_optimizer, train_scheduler = optimizer, scheduler
 
-        train_metrics = run_epoch(device, model, train_retriever, loss, train_optimizer, train_scheduler, train_handler, display_progress=display_progress)
-        val_metrics = run_epoch(device, model, val_retriever, loss, None, None, val_handler, display_progress=display_progress)
-        ctrl_metrics = run_epoch(device, model, ctrl_retriever, loss, None, None, ctrl_handler, display_progress=display_progress)
+        train_metrics = run_epoch(device, model, train_retriever, train_loss, train_optimizer, train_scheduler, train_handler, display_progress=display_progress)
+        val_metrics = run_epoch(device, model, val_retriever, eval_loss, None, None, val_handler, display_progress=display_progress)
+        ctrl_metrics = run_epoch(device, model, ctrl_retriever, eval_loss, None, None, ctrl_handler, display_progress=display_progress)
 
         if tracker.tensorboard_cfg.track_predictions:
             predict_handler = PredictEpochHandler()
@@ -202,7 +203,8 @@ def fit(device: Union[torch.device, int],
 
         if tracker:
             tracker.epoch_completed(FitState(model=model,
-                                             loss=loss,
+                                             train_loss=train_loss,
+                                             eval_loss=eval_loss,
                                              optimizer=optimizer,
                                              epoch=epoch,
                                              num_epochs=num_epochs,
@@ -221,16 +223,16 @@ def fit(device: Union[torch.device, int],
 def score(device: Union[torch.device, int],
           model: Module,
           retriever: DataRetriever,
-          loss: Module,
+          eval_loss: Module,
           display_progress: bool = True) -> Dict[str, Union[int, float]]:
     handler = TrainEvalEpochHandler('score', num_epochs=1)
-    return run_epoch(device, model, retriever, loss, None, None, handler, display_progress=display_progress)
+    return run_epoch(device, model, retriever, eval_loss, None, None, handler, display_progress=display_progress)
 
 
 def score_blend(device: Union[torch.device, int],
                 models: List[Module],
                 retriever: DirectDataRetriever,
-                loss: Module,
+                eval_loss: Module,
                 display_progress: bool = True) -> Dict[str, Union[int, float]]:
     assert len(models) > 0
 
@@ -260,7 +262,7 @@ def score_blend(device: Union[torch.device, int],
     y_probs_blend = torch.mean(y_probs_stack, dim=0)
 
     y_hat = torch.argmax(y_probs_blend, 1)
-    loss_value = float(loss(y_probs_blend, y))
+    loss_value = float(eval_loss(y_probs_blend, y))
 
     correct = float(torch.sum(y_hat == y))
     total = float(y.shape[0])

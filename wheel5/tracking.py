@@ -25,7 +25,8 @@ from .visualization import visualize_cm, visualize_top_errors
 class FitState(object):
     def __init__(self,
                  model: Module,
-                 loss: Module,
+                 train_loss: Module,
+                 eval_loss: Module,
                  optimizer: Optimizer,
                  epoch: int,
                  num_epochs: int,
@@ -33,7 +34,8 @@ class FitState(object):
                  val_metrics: Dict[str, Union[int, float]],
                  ctrl_metrics: Dict[str, Union[int, float]]):
         self.model = model
-        self.loss = loss
+        self.train_loss = train_loss
+        self.eval_loss = eval_loss
         self.optimizer = optimizer
         self.epoch = epoch
         self.num_epochs = num_epochs
@@ -45,7 +47,8 @@ class FitState(object):
     def save(path: str, state: 'FitState'):
         d = {
             'model': state.model,
-            'loss': state.loss,
+            'train_loss': state.train_loss,
+            'eval_loss': state.eval_loss,
             'optimizer': state.optimizer,
             'epoch': state.epoch,
             'num_epochs': state.num_epochs,
@@ -60,7 +63,8 @@ class FitState(object):
         d = torch.load(path)
         return FitState(
             model=d['model'],
-            loss=d['loss'],
+            train_loss=d['train_loss'],
+            eval_loss=d['eval_loss'],
             optimizer=d['optimizer'],
             epoch=d['epoch'],
             num_epochs=d['num_epochs'],
