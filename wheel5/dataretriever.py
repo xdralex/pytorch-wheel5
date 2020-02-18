@@ -59,11 +59,12 @@ class DirectDataRetriever(DataRetriever):
 
 
 class MixupDataIterator(DataIterator):
-    def __init__(self, loader_iter1, loader_iter2, num_classes: int, mix_sampler: Callable[[], float]):
+    def __init__(self, loader_iter1, loader_iter2, num_classes: int, mix_sampler: Callable[[], float], target_shape: str):
         self.loader_iter1 = loader_iter1
         self.loader_iter2 = loader_iter2
         self.num_classes = num_classes
         self.mix_sampler = mix_sampler
+        self.target_shape = target_shape
 
     def __next__(self) -> Tuple[Tensor, Tensor, Optional[Tensor]]:
         x1, y1, indices1 = next(self.loader_iter1)
@@ -83,23 +84,33 @@ class MixupDataIterator(DataIterator):
             x = torch.lerp(x1, x2, weight=q)
             y = torch.lerp(y1, y2, weight=q)
 
-            # transforming y shape: (N, d_1, d_2, ..., d_K, C) => (N, C, d_1, d_2, ..., d_K)
-            order = list(range(0, y.ndim))
-            order[1], order[-1] = order[-1], order[1]
-            y = y.permute(order)
+            if self.target_shape == 'NXC':
+                # y shape is already (N, d_1, d_2, ..., d_K, C)
+                pass
+            elif self.target_shape == 'NCX':
+                # transforming y shape to (N, C, d_1, d_2, ..., d_K)
+                order = list(range(0, y.ndim))
+                order[1], order[-1] = order[-1], order[1]
+                y = y.permute(order)
+            else:
+                raise ValueError(f'Unsupported target shape "{self.target_shape}"')
 
             return x, y, None
 
 
 class MixupDataRetriever(DataRetriever):
-    def __init__(self, loader1: DataLoader, loader2: DataLoader, num_classes: int, mix_sampler: Callable[[], float]):
+    def __init__(self, loader1: DataLoader, loader2: DataLoader, num_classes: int, mix_sampler: Callable[[], float], target_shape: str = 'NXC'):
+        if target_shape != 'NXC' and target_shape != 'NCX':
+            raise ValueError(f'Unsupported target shape "{target_shape}"')
+
         self.loader1 = loader1
         self.loader2 = loader2
         self.num_classes = num_classes
         self.mix_sampler = mix_sampler
+        self.target_shape = target_shape
 
     def __iter__(self) -> DataIterator:
-        return MixupDataIterator(iter(self.loader1), iter(self.loader2), self.num_classes, self.mix_sampler)
+        return MixupDataIterator(iter(self.loader1), iter(self.loader2), self.num_classes, self.mix_sampler, self.target_shape)
 
     def __len__(self) -> int:
         len_1 = len(self.loader1.sampler)
