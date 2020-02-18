@@ -228,44 +228,43 @@ class TrialTracker(object):
                 self.tb_writer.add_histogram(f'weights/{name}', param, state.epoch)
 
         def write_samples(samples, samples_name: str):
-            def arr2str(arr):
-                return f'[' + ', '.join([f'{arr_elem:.3f}' for arr_elem in arr]) + ']'
+            # def arr2str(arr):
+            #     return f'[' + ', '.join([f'{arr_elem:.3f}' for arr_elem in arr]) + ']'
 
             if self.tensorboard_cfg.track_samples and len(samples) > 0:
                 x = torch.stack([self.sample_img_transform(s.x) for s in samples])
-
-                y_strs = []
-                for i in range(0, len(samples)):
-                    s = samples[i]
-                    y_strs.append(f'y={float(s.y):.3f}, y_hat={float(s.y_hat):.3f}, y_probs={arr2str(s.y_probs)}')
-                y_text = '  \n'.join(y_strs)
-
                 self.tb_writer.add_images(f'samples/x/{samples_name}', x, state.epoch)
-                self.tb_writer.add_text(f'samples/y/{samples_name}', y_text, state.epoch)
+
+                # y_strs = []
+                # for i in range(0, len(samples)):
+                #     s = samples[i]
+                #     y_strs.append(f'y={float(s.y):.3f}, y_hat={float(s.y_hat):.3f}, y_probs={arr2str(s.y_probs)}')
+                # y_text = '  \n'.join(y_strs)
+                # self.tb_writer.add_text(f'samples/y/{samples_name}', y_text, state.epoch)
 
         if self.tensorboard_cfg.track_samples:
             write_samples(train_samples, 'train')
             write_samples(val_samples, 'val')
             write_samples(ctrl_samples, 'ctrl')
 
-        if self.tensorboard_cfg.track_predictions:
-            if prediction is not None:
-                cm_fig = visualize_cm(classes, y_true=prediction['y'].numpy(), y_pred=prediction['y_hat'].numpy())
-                self.tb_writer.add_figure(f'predictions/cm', cm_fig, state.epoch)
-
-                pil_image_transform = ToPILImage()
-
-                def viz_transform(x):
-                    return pil_image_transform(self.sample_img_transform(x))
-
-                mismatch_figs = visualize_top_errors(classes,
-                                                     y_true=prediction['y'].numpy(),
-                                                     y_pred=prediction['y_hat'].numpy(),
-                                                     image_indices=prediction['indices'].numpy(),
-                                                     image_dataset=TransformDataset(prediction_dataset, viz_transform))
-
-                for i, mismatch_fig in enumerate(mismatch_figs):
-                    self.tb_writer.add_figure(f'predictions/mismatch/{i}', mismatch_fig, state.epoch)
+        # if self.tensorboard_cfg.track_predictions:
+        #     if prediction is not None:
+        #         cm_fig = visualize_cm(classes, y_true=prediction['y'].numpy(), y_pred=prediction['y_hat'].numpy())
+        #         self.tb_writer.add_figure(f'predictions/cm', cm_fig, state.epoch)
+        #
+        #         pil_image_transform = ToPILImage()
+        #
+        #         def viz_transform(x):
+        #             return pil_image_transform(self.sample_img_transform(x))
+        #
+        #         mismatch_figs = visualize_top_errors(classes,
+        #                                              y_true=prediction['y'].numpy(),
+        #                                              y_pred=prediction['y_hat'].numpy(),
+        #                                              image_indices=prediction['indices'].numpy(),
+        #                                              image_dataset=TransformDataset(prediction_dataset, viz_transform))
+        #
+        #         for i, mismatch_fig in enumerate(mismatch_figs):
+        #             self.tb_writer.add_figure(f'predictions/mismatch/{i}', mismatch_fig, state.epoch)
 
         for index, param_group in enumerate(state.optimizer.param_groups):
             for k, v in param_group.items():

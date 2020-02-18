@@ -1,197 +1,59 @@
-from abc import ABC, abstractmethod
+from abc import abstractmethod, ABC
+from typing import Tuple
 
 import torch
-from numpy.random.mtrand import RandomState
 from torch import Tensor
+from torch import nn
 
 
-class Meter(ABC):
+def exact_match_accuracy(y: Tensor, z: Tensor, y_probs: Tensor, y_hat: Tensor) -> Tuple[float, float]:
+    assert y.ndim == 1
+    assert y_hat.ndim == 1
+    assert y.shape == y_hat.shape
+
+    correct = float(torch.sum(y_hat == y))
+    total = float(y.shape[0])
+
+    return correct, total
+
+
+def jaccard_accuracy(y: Tensor, z: Tensor, y_probs: Tensor, y_hat: Tensor) -> Tuple[float, float]:
+    assert y.ndim == 2
+    assert y_probs.ndim == 2
+    assert y.shape == y_probs.shape
+
+    correct = 0.0
+    total = 0.0
+    for i in range(0, y.shape[0]):
+        intersection = torch.min(y[i], y_probs[i])
+        union = torch.max(y[i], y_probs[i])
+
+        correct += float(torch.sum(intersection))
+        total += float(torch.sum(union))
+
+    return correct, total
+
+
+class Accuracy(nn.Module, ABC):
+    def __init__(self):
+        super(Accuracy, self).__init__()
+
     @abstractmethod
-    def add(self, *args):
+    def forward(self, y: Tensor, z: Tensor, y_probs: Tensor, y_hat: Tensor) -> Tuple[float, float]:
         pass
 
-    @abstractmethod
-    def reset(self):
-        pass
 
-    @abstractmethod
-    def value(self):
-        pass
-
-
-class LastMeter(Meter):
+class ExactMatchAccuracy(Accuracy):
     def __init__(self):
-        self.last = None
+        super(ExactMatchAccuracy, self).__init__()
 
-    def add(self, value):
-        self.last = value
-        return value
-
-    def reset(self):
-        self.last = None
-
-    def value(self):
-        return self.last
+    def forward(self, y: Tensor, z: Tensor, y_probs: Tensor, y_hat: Tensor) -> Tuple[float, float]:
+        return exact_match_accuracy(y, z, y_probs, y_hat)
 
 
-class CountMeter(Meter):
+class JaccardAccuracy(Accuracy):
     def __init__(self):
-        self.count = 0
+        super(JaccardAccuracy, self).__init__()
 
-    def add(self):
-        self.count += 1
-        return 1
-
-    def reset(self):
-        self.count = 0
-
-    def value(self):
-        return self.count
-
-
-class SumMeter(Meter):
-    def __init__(self):
-        self.sum = 0.0
-
-    def add(self, value):
-        self.sum += value
-        return value
-
-    def reset(self):
-        self.sum = 0.0
-
-    def value(self):
-        return self.sum
-
-
-class AverageMeter(Meter):
-    def __init__(self):
-        self.sum = 0.0
-        self.count = 0
-
-    def add(self, value):
-        self.sum += value
-        self.count += 1
-        return value
-
-    def reset(self):
-        self.sum = 0.0
-        self.count = 0
-
-    def value(self):
-        if self.count == 0:
-            return None
-        else:
-            return self.sum / self.count
-
-
-class MaxMeter(Meter):
-    def __init__(self):
-        self.best = None
-
-    def add(self, value):
-        if self.best is None:
-            self.best = value
-        else:
-            self.best = max(self.best, value)
-        return value
-
-    def reset(self):
-        self.best = None
-
-    def value(self):
-        return self.best
-
-
-class MinMeter(Meter):
-    def __init__(self):
-        self.best = None
-
-    def add(self, value):
-        if self.best is None:
-            self.best = value
-        else:
-            self.best = min(self.best, value)
-        return value
-
-    def reset(self):
-        self.best = None
-
-    def value(self):
-        return self.best
-
-
-class AccuracyMeter(Meter):
-    def __init__(self):
-        self.correct_sum = 0.0
-        self.total_sum = 0.0
-
-    def add(self, correct, total):
-        self.correct_sum += correct
-        self.total_sum += total
-        return correct / total
-
-    def reset(self):
-        self.correct_sum = 0.0
-        self.total_sum = 0.0
-
-    def value(self):
-        return self.correct_sum / self.total_sum
-
-
-class ArrayAccumMeter(Meter):
-    def __init__(self):
-        self.accum = []
-
-    def add(self, tensor: Tensor):
-        self.accum.append(tensor)
-
-    def reset(self):
-        self.accum = []
-
-    def value(self):
-        return torch.cat(self.accum)
-
-
-class LimitedSamplingMeter(Meter):
-    def __init__(self, k):
-        self.k = k
-        self.accum = []
-
-    def add(self, elements):
-        for element in elements:
-            if len(self.accum) < self.k:
-                self.accum.append(element)
-
-    def reset(self):
-        self.accum = []
-
-    def value(self):
-        return self.accum
-
-
-class ReservoirSamplingMeter(Meter):
-    def __init__(self, k, random_state: RandomState = None):
-        self.k = k
-        self.random_state = random_state or RandomState()
-
-        self.accum = []
-        self.counter = 0
-
-    def add(self, elements):
-        for element in elements:
-            if len(self.accum) < self.k:
-                self.accum.append(element)
-            else:
-                r = self.random_state.randint(0, self.counter + 1)
-                if r < self.k:
-                    self.accum[r] = element
-
-            self.counter += 1
-
-    def reset(self):
-        self.accum = []
-        self.counter = 0
-
-    def value(self):
-        return self.accum
+    def forward(self, y: Tensor, z: Tensor, y_probs: Tensor, y_hat: Tensor) -> Tuple[float, float]:
+        return jaccard_accuracy(y, z, y_probs, y_hat)

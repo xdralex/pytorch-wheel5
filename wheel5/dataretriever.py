@@ -1,10 +1,13 @@
 from abc import ABC, abstractmethod
-from typing import Tuple, Callable, Optional
+from typing import Tuple, Optional
 
+import numpy as np
 import torch
 from torch import Tensor
-from torch.utils.data import DataLoader, Dataset
 from torch.nn import functional as F
+from torch.utils.data import DataLoader, Dataset
+
+from .formats import TargetFormat
 
 
 class DataIterator(ABC):
@@ -30,18 +33,24 @@ class DataRetriever(ABC):
     def batch_size(self) -> int:
         pass
 
+    @property
+    @abstractmethod
+    def target_format(self) -> TargetFormat:
+        pass
+
 
 class DirectDataIterator(DataIterator):
-    def __init__(self, loader_iter):
-        self.loader_iter = loader_iter
+    def __init__(self, iterator):
+        self.iterator = iterator
 
     def __next__(self) -> Tuple[Tensor, Tensor, Tensor]:
-        return next(self.loader_iter)
+        return next(self.iterator)
 
 
 class DirectDataRetriever(DataRetriever):
-    def __init__(self, loader: DataLoader):
+    def __init__(self, loader: DataLoader, target_format: TargetFormat):
         self.loader = loader
+        self._target_format = target_format
 
     def __iter__(self) -> DataIterator:
         return DirectDataIterator(iter(self.loader))
@@ -57,18 +66,21 @@ class DirectDataRetriever(DataRetriever):
     def dataset(self) -> Dataset:
         return self.loader.dataset
 
+    @property
+    def target_format(self) -> TargetFormat:
+        return self._target_format
+
 
 class MixupDataIterator(DataIterator):
-    def __init__(self, loader_iter1, loader_iter2, num_classes: int, mix_sampler: Callable[[], float], target_shape: str):
-        self.loader_iter1 = loader_iter1
-        self.loader_iter2 = loader_iter2
+    def __init__(self, iterator1, iterator2, num_classes: int, alpha: float):
+        self.iterator1 = iterator1
+        self.iterator2 = iterator2
         self.num_classes = num_classes
-        self.mix_sampler = mix_sampler
-        self.target_shape = target_shape
+        self.alpha = alpha
 
     def __next__(self) -> Tuple[Tensor, Tensor, Optional[Tensor]]:
-        x1, y1, indices1 = next(self.loader_iter1)
-        x2, y2, indices2 = next(self.loader_iter2)
+        x1, y1, indices1 = next(self.iterator1)
+        x2, y2, indices2 = next(self.iterator2)
 
         with torch.no_grad():
             assert x1.shape == x2.shape
@@ -80,49 +92,46 @@ class MixupDataIterator(DataIterator):
             y2 = F.one_hot(y2, self.num_classes).type_as(x2)
 
             # mixing inputs and targets
-            q = self.mix_sampler()
+            q = np.random.beta(a=self.alpha, b=self.alpha)
             x = torch.lerp(x1, x2, weight=q)
             y = torch.lerp(y1, y2, weight=q)
 
-            if self.target_shape == 'NXC':
-                # y shape is already (N, d_1, d_2, ..., d_K, C)
-                pass
-            elif self.target_shape == 'NCX':
-                # transforming y shape to (N, C, d_1, d_2, ..., d_K)
-                order = list(range(0, y.ndim))
-                order[1], order[-1] = order[-1], order[1]
-                y = y.permute(order)
-            else:
-                raise ValueError(f'Unsupported target shape "{self.target_shape}"')
+            # transforming y shape from (N, d_1, d_2, ..., d_K, C) to (N, C, d_1, d_2, ..., d_K)
+            order = list(range(0, y.ndim))
+            order[1], order[-1] = order[-1], order[1]
+            y = y.permute(order)
 
             return x, y, None
 
 
 class MixupDataRetriever(DataRetriever):
-    def __init__(self, loader1: DataLoader, loader2: DataLoader, num_classes: int, mix_sampler: Callable[[], float], target_shape: str = 'NXC'):
-        if target_shape != 'NXC' and target_shape != 'NCX':
-            raise ValueError(f'Unsupported target shape "{target_shape}"')
+    def __init__(self, retriever1: DataRetriever, retriever2: DataRetriever, num_classes: int, alpha: float):
+        assert retriever1.target_format == TargetFormat.CLASS_INDEX
+        assert retriever2.target_format == TargetFormat.CLASS_INDEX
 
-        self.loader1 = loader1
-        self.loader2 = loader2
+        self.retriever1 = retriever1
+        self.retriever2 = retriever2
         self.num_classes = num_classes
-        self.mix_sampler = mix_sampler
-        self.target_shape = target_shape
+        self.alpha = alpha
 
     def __iter__(self) -> DataIterator:
-        return MixupDataIterator(iter(self.loader1), iter(self.loader2), self.num_classes, self.mix_sampler, self.target_shape)
+        return MixupDataIterator(iter(self.retriever1), iter(self.retriever2), self.num_classes, self.alpha)
 
     def __len__(self) -> int:
-        len_1 = len(self.loader1.sampler)
-        len_2 = len(self.loader2.sampler)
+        len_1 = len(self.retriever1)
+        len_2 = len(self.retriever2)
 
         assert len_1 == len_2
         return len_1
 
     @property
     def batch_size(self) -> int:
-        batch_size1 = self.loader1.batch_size
-        batch_size2 = self.loader2.batch_size
+        batch_size1 = self.retriever1.batch_size
+        batch_size2 = self.retriever2.batch_size
 
         assert batch_size1 == batch_size2
         return batch_size1
+
+    @property
+    def target_format(self) -> TargetFormat:
+        return TargetFormat.ONE_HOT
