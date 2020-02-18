@@ -71,7 +71,7 @@ class TrainEvalEpochHandler(EpochHandler):
 
         self._state_repr = f'{self._prefix()} - loss=?, acc=?'
 
-    def batch_processed(self, x: Tensor, y: Tensor, y_probs: Tensor, y_hat: Tensor, loss_value: Optional[Tensor], indices: Optional[Tensor]):
+    def batch_processed(self, x: Tensor, y: Tensor, y_probs: Tensor, y_hat: Tensor, loss_value: Tensor, indices: Optional[Tensor]):
         assert 0 < self.epoch <= self.num_epochs
         assert self.in_epoch
 

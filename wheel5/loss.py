@@ -24,6 +24,8 @@ def smoothed_cross_entropy(input: Tensor,
         assert smooth_dist.ndim == 1
         assert smooth_dist.shape[0] == num_classes
 
+        smooth_dist = smooth_dist.to(input.device)
+
         log_q = F.log_softmax(input, dim=1)         # log_q shape: (N, C, d_1, d_2, ..., d_K)
 
         # adjusting input shape for simpler broadcasting
