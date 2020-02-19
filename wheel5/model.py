@@ -247,7 +247,7 @@ def score_blend(device: Union[torch.device, int],
         handler = PredictEpochHandler()
         results = run_epoch(device, model_device, retriever, None, None, None, handler, display_progress=display_progress)
 
-        order = torch.argsort(results['indices'])
+        order = torch.argsort(results.indices)
         y_ordered = torch.index_select(results.y, dim=0, index=order)
         y_probs_ordered = torch.index_select(results.y_probs, dim=0, index=order)
 
