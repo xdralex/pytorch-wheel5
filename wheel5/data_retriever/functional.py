@@ -42,7 +42,7 @@ def cutmix(img1: Tensor, lb1: Tensor,
         assert len(img1.shape) == 4
         assert len(lb1.shape) == 2
 
-        h, w = img1.shape[-2, :]
+        h, w = img1.shape[-2:]
 
         factor = np.sqrt(1 - q)
         patch_h, patch_w = int(np.round(h * factor)), int(np.round(w * factor))
@@ -59,7 +59,7 @@ def cutmix(img1: Tensor, lb1: Tensor,
             bb2_y2, bb2_x2 = bb2_y1 + patch_h, bb2_x1 + patch_w
 
         img = img2.clone()
-        img[:, bb2_y1:bb2_y2, bb2_x1:bb2_x2] = img1[:, bb1_y1:bb1_y2, bb1_x1:bb1_x2]
+        img[:, :, bb2_y1:bb2_y2, bb2_x1:bb2_x2] = img1[:, :, bb1_y1:bb1_y2, bb1_x1:bb1_x2]
 
         weight = 1.0 - patch_h * patch_w / float(h * w)
         lb = torch.lerp(lb1, lb2, weight=weight)
