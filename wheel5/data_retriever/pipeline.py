@@ -3,12 +3,11 @@ from enum import Enum
 from typing import Tuple, Optional
 
 import torch
-from numpy.random.mtrand import RandomState
 from torch import Tensor
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, Dataset
 
-from .functional import mixup
+from .functional import mixup, cutmix
 
 
 class TargetFormat(Enum):
@@ -83,17 +82,17 @@ class OneHotDataIterator(DataIterator):
         self.num_classes = num_classes
 
     def __next__(self) -> Tuple[Tensor, Tensor, Tensor]:
-        x, y, indices = next(self.iterator)
+        img, lb, indices = next(self.iterator)
 
         with torch.no_grad():
-            y = F.one_hot(y, self.num_classes).type_as(x)
+            lb = F.one_hot(lb, self.num_classes).type_as(img)
 
-            # transforming y shape from (N, d_1, d_2, ..., d_K, C) to (N, C, d_1, d_2, ..., d_K)
-            order = list(range(0, y.ndim))
+            # transforming lb shape from (N, d_1, d_2, ..., d_K, C) to (N, C, d_1, d_2, ..., d_K)
+            order = list(range(0, lb.ndim))
             order[1], order[-1] = order[-1], order[1]
-            y = y.permute(order)
+            lb = lb.permute(order)
 
-            return x, y, indices
+            return img, lb, indices
 
 
 class OneHotDataRetriever(DataRetriever):
@@ -118,34 +117,33 @@ class OneHotDataRetriever(DataRetriever):
         return TargetFormat.SOFT_LABEL
 
 
-class MixupDataIterator(DataIterator):
-    def __init__(self, iterator1, iterator2, alpha: float):
+class TwoMixDataIterator(DataIterator):
+    def __init__(self, iterator1, iterator2, mixer_fn):
         self.iterator1 = iterator1
         self.iterator2 = iterator2
-        self.alpha = alpha
-        self.random_state = RandomState()
+        self.mixer_fn = mixer_fn
 
     def __next__(self) -> Tuple[Tensor, Tensor, Optional[Tensor]]:
-        x1, y1, indices1 = next(self.iterator1)
-        x2, y2, indices2 = next(self.iterator2)
+        img1, lb1, indices1 = next(self.iterator1)
+        img2, lb2, indices2 = next(self.iterator2)
 
         assert indices1.shape == indices2.shape
-        x, y = mixup(x1, y1, x2, y2, self.alpha, self.random_state)
+        img, lb = self.mixer_fn(img1, lb1, img2, lb2)
 
-        return x, y, None
+        return img, lb, None
 
 
-class MixupDataRetriever(DataRetriever):
-    def __init__(self, retriever1: DataRetriever, retriever2: DataRetriever, alpha: float):
+class TwoMixDataRetriever(DataRetriever):
+    def __init__(self, retriever1: DataRetriever, retriever2: DataRetriever, mixer_fn):
         assert retriever1.target_format == TargetFormat.SOFT_LABEL
         assert retriever2.target_format == TargetFormat.SOFT_LABEL
 
         self.retriever1 = retriever1
         self.retriever2 = retriever2
-        self.alpha = alpha
+        self.mixer_fn = mixer_fn
 
     def __iter__(self) -> DataIterator:
-        return MixupDataIterator(iter(self.retriever1), iter(self.retriever2), self.alpha)
+        return TwoMixDataIterator(iter(self.retriever1), iter(self.retriever2), self.mixer_fn)
 
     def __len__(self) -> int:
         len_1 = len(self.retriever1)
@@ -165,3 +163,19 @@ class MixupDataRetriever(DataRetriever):
     @property
     def target_format(self) -> TargetFormat:
         return TargetFormat.SOFT_LABEL
+
+
+class MixupDataRetriever(TwoMixDataRetriever):
+    def __init__(self, retriever1: DataRetriever, retriever2: DataRetriever, alpha: float):
+        def mixer_fn(img1: Tensor, lb1: Tensor, img2: Tensor, lb2: Tensor):
+            return mixup(img1, lb1, img2, lb2, alpha)
+
+        super(MixupDataRetriever, self).__init__(retriever1, retriever2, mixer_fn)
+
+
+class CutMixDataRetriever(TwoMixDataRetriever):
+    def __init__(self, retriever1: DataRetriever, retriever2: DataRetriever, alpha: float, sync: bool):
+        def mixer_fn(img1: Tensor, lb1: Tensor, img2: Tensor, lb2: Tensor):
+            return cutmix(img1, lb1, img2, lb2, alpha, sync)
+
+        super(CutMixDataRetriever, self).__init__(retriever1, retriever2, mixer_fn)
