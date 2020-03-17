@@ -12,7 +12,7 @@ from torch.nn.functional import log_softmax
 from tqdm import tqdm
 
 from .cuda import memory_stats
-from .dataretriever import DataRetriever, DirectDataRetriever
+from .data_retriever import DataRetriever, DirectDataRetriever
 from .metering import AverageMeter, AccuracyMeter, ArrayAccumMeter, ReservoirSamplingMeter, LimitedSamplingMeter
 from .metrics import Accuracy
 from .tracking import TrialTracker, FitState

@@ -1,13 +1,19 @@
 from abc import ABC, abstractmethod
+from enum import Enum
 from typing import Tuple, Optional
 
-import numpy as np
 import torch
+from numpy.random.mtrand import RandomState
 from torch import Tensor
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, Dataset
 
-from .formats import TargetFormat
+from .functional import mixup
+
+
+class TargetFormat(Enum):
+    CLASS_INDEX = 1
+    SOFT_LABEL = 2
 
 
 class DataIterator(ABC):
@@ -71,51 +77,75 @@ class DirectDataRetriever(DataRetriever):
         return self._target_format
 
 
-class MixupDataIterator(DataIterator):
-    def __init__(self, iterator1, iterator2, num_classes: int, alpha: float):
-        self.iterator1 = iterator1
-        self.iterator2 = iterator2
+class OneHotDataIterator(DataIterator):
+    def __init__(self, iterator, num_classes: int):
+        self.iterator = iterator
         self.num_classes = num_classes
-        self.alpha = alpha
 
-    def __next__(self) -> Tuple[Tensor, Tensor, Optional[Tensor]]:
-        x1, y1, indices1 = next(self.iterator1)
-        x2, y2, indices2 = next(self.iterator2)
+    def __next__(self) -> Tuple[Tensor, Tensor, Tensor]:
+        x, y, indices = next(self.iterator)
 
         with torch.no_grad():
-            assert x1.shape == x2.shape
-            assert y1.shape == y2.shape
-            assert indices1.shape == indices2.shape
-
-            # transforming targets to one hot shape
-            y1 = F.one_hot(y1, self.num_classes).type_as(x1)
-            y2 = F.one_hot(y2, self.num_classes).type_as(x2)
-
-            # mixing inputs and targets
-            q = np.random.beta(a=self.alpha, b=self.alpha)
-            x = torch.lerp(x1, x2, weight=q)
-            y = torch.lerp(y1, y2, weight=q)
+            y = F.one_hot(y, self.num_classes).type_as(x)
 
             # transforming y shape from (N, d_1, d_2, ..., d_K, C) to (N, C, d_1, d_2, ..., d_K)
             order = list(range(0, y.ndim))
             order[1], order[-1] = order[-1], order[1]
             y = y.permute(order)
 
-            return x, y, None
+            return x, y, indices
+
+
+class OneHotDataRetriever(DataRetriever):
+    def __init__(self, retriever: DataRetriever, num_classes: int):
+        assert retriever.target_format == TargetFormat.CLASS_INDEX
+
+        self.retriever = retriever
+        self.num_classes = num_classes
+
+    def __iter__(self) -> DataIterator:
+        return OneHotDataIterator(iter(self.retriever), num_classes=self.num_classes)
+
+    def __len__(self) -> int:
+        return len(self.retriever)
+
+    @property
+    def batch_size(self) -> int:
+        return self.retriever.batch_size
+
+    @property
+    def target_format(self) -> TargetFormat:
+        return TargetFormat.SOFT_LABEL
+
+
+class MixupDataIterator(DataIterator):
+    def __init__(self, iterator1, iterator2, alpha: float):
+        self.iterator1 = iterator1
+        self.iterator2 = iterator2
+        self.alpha = alpha
+        self.random_state = RandomState()
+
+    def __next__(self) -> Tuple[Tensor, Tensor, Optional[Tensor]]:
+        x1, y1, indices1 = next(self.iterator1)
+        x2, y2, indices2 = next(self.iterator2)
+
+        assert indices1.shape == indices2.shape
+        x, y = mixup(x1, y1, x2, y2, self.alpha, self.random_state)
+
+        return x, y, None
 
 
 class MixupDataRetriever(DataRetriever):
-    def __init__(self, retriever1: DataRetriever, retriever2: DataRetriever, num_classes: int, alpha: float):
-        assert retriever1.target_format == TargetFormat.CLASS_INDEX
-        assert retriever2.target_format == TargetFormat.CLASS_INDEX
+    def __init__(self, retriever1: DataRetriever, retriever2: DataRetriever, alpha: float):
+        assert retriever1.target_format == TargetFormat.SOFT_LABEL
+        assert retriever2.target_format == TargetFormat.SOFT_LABEL
 
         self.retriever1 = retriever1
         self.retriever2 = retriever2
-        self.num_classes = num_classes
         self.alpha = alpha
 
     def __iter__(self) -> DataIterator:
-        return MixupDataIterator(iter(self.retriever1), iter(self.retriever2), self.num_classes, self.alpha)
+        return MixupDataIterator(iter(self.retriever1), iter(self.retriever2), self.alpha)
 
     def __len__(self) -> int:
         len_1 = len(self.retriever1)
@@ -134,4 +164,4 @@ class MixupDataRetriever(DataRetriever):
 
     @property
     def target_format(self) -> TargetFormat:
-        return TargetFormat.ONE_HOT
+        return TargetFormat.SOFT_LABEL
