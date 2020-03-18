@@ -27,14 +27,35 @@ def mixup(img1: Tensor, lb1: Tensor,
         return img, lb
 
 
+def rand_bbox(w: int, h: int, q: float, random_state: Optional[RandomState] = None) -> Tuple[int, int, int, int]:
+    random_state = random_state or RandomState()
+
+    factor = np.sqrt(q)
+    patch_w, patch_h = int(np.round(w * factor)), int(np.round(h * factor))
+
+    cx, cy = random_state.randint(w), random_state.randint(h)
+
+    bb_x1 = int(np.clip(cx - patch_w // 2, 0, w))
+    bb_y1 = int(np.clip(cy - patch_h // 2, 0, h))
+    bb_x2 = int(np.clip(cx + patch_w // 2, 0, w))
+    bb_y2 = int(np.clip(cy + patch_h // 2, 0, h))
+
+    return bb_x1, bb_y1, bb_x2, bb_y2
+
+
 def cutmix(img1: Tensor, lb1: Tensor,
            img2: Tensor, lb2: Tensor,
-           alpha: float, sync: bool, random_state: Optional[RandomState] = None) -> Tuple[Tensor, Tensor]:
+           alpha: float, mode: str = 'compact', random_state: Optional[RandomState] = None) -> Tuple[Tensor, Tensor]:
     # img shape: (N, F, H, W)
     # lb shape: (N, C)
 
+    assert mode in ['compact', 'halo', 'both']
+
     random_state = random_state or RandomState()
     q = random_state.beta(a=alpha, b=alpha)
+
+    if (mode == 'compact' and q > 0.5) or (mode == 'halo' and q < 0.5):
+        q = 1 - q
 
     with torch.no_grad():
         assert img1.shape == img2.shape
@@ -43,25 +64,12 @@ def cutmix(img1: Tensor, lb1: Tensor,
         assert len(lb1.shape) == 2
 
         h, w = img1.shape[-2:]
-
-        factor = np.sqrt(1 - q)
-        patch_h, patch_w = int(np.round(h * factor)), int(np.round(w * factor))
-        sample_h, sample_w = h - patch_h + 1, w - patch_w + 1
-
-        bb1_y1, bb1_x1 = random_state.randint(sample_h), random_state.randint(sample_w)
-        bb1_y2, bb1_x2 = bb1_y1 + patch_h, bb1_x1 + patch_w        
-
-        if sync:
-            bb2_y1, bb2_x1 = bb1_y1, bb1_x1
-            bb2_y2, bb2_x2 = bb1_y2, bb1_x2
-        else:
-            bb2_y1, bb2_x1 = random_state.randint(sample_h), random_state.randint(sample_w)
-            bb2_y2, bb2_x2 = bb2_y1 + patch_h, bb2_x1 + patch_w
+        bb_x1, bb_y1, bb_x2, bb_y2 = rand_bbox(h, w, q, random_state)
 
         img = img2.clone()
-        img[:, :, bb2_y1:bb2_y2, bb2_x1:bb2_x2] = img1[:, :, bb1_y1:bb1_y2, bb1_x1:bb1_x2]
+        img[:, :, bb_y1:bb_y2, bb_x1:bb_x2] = img1[:, :, bb_y1:bb_y2, bb_x1:bb_x2]
 
-        weight = 1.0 - patch_h * patch_w / float(h * w)
+        weight = 1.0 - (bb_y2 - bb_y1) * (bb_x2 - bb_x1) / float(h * w)
         lb = torch.lerp(lb1, lb2, weight=weight)
 
         return img, lb

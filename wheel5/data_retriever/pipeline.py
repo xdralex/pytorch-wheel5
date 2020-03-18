@@ -174,8 +174,8 @@ class MixupDataRetriever(TwoMixDataRetriever):
 
 
 class CutMixDataRetriever(TwoMixDataRetriever):
-    def __init__(self, retriever1: DataRetriever, retriever2: DataRetriever, alpha: float, sync: bool):
+    def __init__(self, retriever1: DataRetriever, retriever2: DataRetriever, alpha: float, mode: str = 'compact'):
         def mixer_fn(img1: Tensor, lb1: Tensor, img2: Tensor, lb2: Tensor):
-            return cutmix(img1, lb1, img2, lb2, alpha, sync)
+            return cutmix(img1, lb1, img2, lb2, alpha, mode)
 
         super(CutMixDataRetriever, self).__init__(retriever1, retriever2, mixer_fn)
