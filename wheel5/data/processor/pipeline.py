@@ -24,7 +24,7 @@ class DataIterator(ABC):
         pass
 
 
-class DataRetriever(ABC):
+class DataProcessor(ABC):
     @abstractmethod
     def __iter__(self) -> DataIterator:
         pass
@@ -52,7 +52,7 @@ class DirectDataIterator(DataIterator):
         return next(self.iterator)
 
 
-class DirectDataRetriever(DataRetriever):
+class DirectDataProcessor(DataProcessor):
     def __init__(self, loader: DataLoader, target_format: TargetFormat):
         self.loader = loader
         self._target_format = target_format
@@ -95,22 +95,22 @@ class OneHotDataIterator(DataIterator):
             return img, lb, indices
 
 
-class OneHotDataRetriever(DataRetriever):
-    def __init__(self, retriever: DataRetriever, num_classes: int):
-        assert retriever.target_format == TargetFormat.CLASS_INDEX
+class OneHotDataProcessor(DataProcessor):
+    def __init__(self, processor: DataProcessor, num_classes: int):
+        assert processor.target_format == TargetFormat.CLASS_INDEX
 
-        self.retriever = retriever
+        self.processor = processor
         self.num_classes = num_classes
 
     def __iter__(self) -> DataIterator:
-        return OneHotDataIterator(iter(self.retriever), num_classes=self.num_classes)
+        return OneHotDataIterator(iter(self.processor), num_classes=self.num_classes)
 
     def __len__(self) -> int:
-        return len(self.retriever)
+        return len(self.processor)
 
     @property
     def batch_size(self) -> int:
-        return self.retriever.batch_size
+        return self.processor.batch_size
 
     @property
     def target_format(self) -> TargetFormat:
@@ -133,29 +133,29 @@ class TwoMixDataIterator(DataIterator):
         return img, lb, None
 
 
-class TwoMixDataRetriever(DataRetriever):
-    def __init__(self, retriever1: DataRetriever, retriever2: DataRetriever, mixer_fn):
-        assert retriever1.target_format == TargetFormat.SOFT_LABEL
-        assert retriever2.target_format == TargetFormat.SOFT_LABEL
+class TwoMixDataProcessor(DataProcessor):
+    def __init__(self, processor1: DataProcessor, processor2: DataProcessor, mixer_fn):
+        assert processor1.target_format == TargetFormat.SOFT_LABEL
+        assert processor2.target_format == TargetFormat.SOFT_LABEL
 
-        self.retriever1 = retriever1
-        self.retriever2 = retriever2
+        self.processor1 = processor1
+        self.processor2 = processor2
         self.mixer_fn = mixer_fn
 
     def __iter__(self) -> DataIterator:
-        return TwoMixDataIterator(iter(self.retriever1), iter(self.retriever2), self.mixer_fn)
+        return TwoMixDataIterator(iter(self.processor1), iter(self.processor2), self.mixer_fn)
 
     def __len__(self) -> int:
-        len_1 = len(self.retriever1)
-        len_2 = len(self.retriever2)
+        len_1 = len(self.processor1)
+        len_2 = len(self.processor2)
 
         assert len_1 == len_2
         return len_1
 
     @property
     def batch_size(self) -> int:
-        batch_size1 = self.retriever1.batch_size
-        batch_size2 = self.retriever2.batch_size
+        batch_size1 = self.processor1.batch_size
+        batch_size2 = self.processor2.batch_size
 
         assert batch_size1 == batch_size2
         return batch_size1
@@ -165,17 +165,17 @@ class TwoMixDataRetriever(DataRetriever):
         return TargetFormat.SOFT_LABEL
 
 
-class MixupDataRetriever(TwoMixDataRetriever):
-    def __init__(self, retriever1: DataRetriever, retriever2: DataRetriever, alpha: float):
+class MixupDataProcessor(TwoMixDataProcessor):
+    def __init__(self, processor1: DataProcessor, processor2: DataProcessor, alpha: float):
         def mixer_fn(img1: Tensor, lb1: Tensor, img2: Tensor, lb2: Tensor):
             return mixup(img1, lb1, img2, lb2, alpha)
 
-        super(MixupDataRetriever, self).__init__(retriever1, retriever2, mixer_fn)
+        super(MixupDataProcessor, self).__init__(processor1, processor2, mixer_fn)
 
 
-class CutMixDataRetriever(TwoMixDataRetriever):
-    def __init__(self, retriever1: DataRetriever, retriever2: DataRetriever, alpha: float, mode: str = 'compact'):
+class CutMixDataProcessor(TwoMixDataProcessor):
+    def __init__(self, processor1: DataProcessor, processor2: DataProcessor, alpha: float, mode: str = 'compact'):
         def mixer_fn(img1: Tensor, lb1: Tensor, img2: Tensor, lb2: Tensor):
             return cutmix(img1, lb1, img2, lb2, alpha, mode)
 
-        super(CutMixDataRetriever, self).__init__(retriever1, retriever2, mixer_fn)
+        super(CutMixDataProcessor, self).__init__(processor1, processor2, mixer_fn)
