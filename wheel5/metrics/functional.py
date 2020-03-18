@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 
 
-def exact_match_accuracy(y: Tensor, z: Tensor, y_probs: Tensor, y_hat: Tensor) -> Tuple[float, float]:
+def exact_match_accuracy(y: Tensor, y_hat: Tensor) -> Tuple[float, float]:
     assert y.ndim == 1
     assert y_hat.ndim == 1
     assert y.shape == y_hat.shape
@@ -15,7 +15,7 @@ def exact_match_accuracy(y: Tensor, z: Tensor, y_probs: Tensor, y_hat: Tensor) -
     return correct, total
 
 
-def jaccard_accuracy(y: Tensor, z: Tensor, y_probs: Tensor, y_hat: Tensor) -> Tuple[float, float]:
+def jaccard_accuracy(y: Tensor, y_probs: Tensor) -> Tuple[float, float]:
     assert y.ndim == 2
     assert y_probs.ndim == 2
     assert y.shape == y_probs.shape

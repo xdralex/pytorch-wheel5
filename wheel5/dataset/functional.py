@@ -1,9 +1,18 @@
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
+import numpy as np
 import torch
 from numpy.random.mtrand import RandomState
-import numpy as np
 from torch import Tensor
+
+
+def class_distribution(targets: List[int], classes: int) -> np.ndarray:
+    counts = np.zeros(classes)
+    for target in targets:
+        assert 0 <= target < classes
+        counts[target] += 1
+
+    return counts
 
 
 def mixup(img1: Tensor, lb1: Tensor,

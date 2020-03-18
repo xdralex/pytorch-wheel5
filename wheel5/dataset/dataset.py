@@ -1,20 +1,38 @@
+from abc import ABC, abstractmethod
 import hashlib
 import os
 import pathlib
 from struct import pack, unpack
-from typing import Callable, Tuple, Any
+from typing import Callable, Tuple, Any, List, TypeVar, Generic, Optional
 
 import albumentations as albu
 import lmdb
 import numpy as np
 import pandas as pd
+import torch
 from PIL import Image
 from PIL.Image import Image as Img
+from numpy.random.mtrand import RandomState
 from pandas.util import hash_pandas_object
+from torch import Tensor
 from torch.utils.data import Dataset, Sampler
+from torch.nn import functional as F
+from torchvision.transforms import functional as VTF
 
 
-class LMDBImageDataset(Dataset):
+from .functional import cutmix, mixup
+
+
+T = TypeVar('T')
+
+
+class ImageDataset(ABC, Generic[T], Dataset):
+    @abstractmethod
+    def __getitem__(self, index: int) -> Tuple[Img, T, int]:
+        pass
+
+
+class LMDBImageDataset(ImageDataset[T]):
     r"""A dataset storing images in the LMDB store.
 
     This dataset takes a user-provided dataframe ['path', 'target', ...] to
@@ -95,7 +113,7 @@ class LMDBImageDataset(Dataset):
     def __len__(self) -> int:
         return self.df.shape[0]
 
-    def __getitem__(self, index: int) -> Tuple[Img, Any, int]:
+    def __getitem__(self, index: int) -> Tuple[Img, T, int]:
         row = self.df.iloc[index, :]
         target = row['target']
 
@@ -110,6 +128,67 @@ class LMDBImageDataset(Dataset):
             image = Image.frombytes('RGB', (w, h), v_data)
 
         return image, target, index
+
+    def targets(self) -> List[T]:
+        return self.df['target'].tolist()
+
+
+class ImageOneHotDataset(ImageDataset[Tensor]):
+    def __init__(self, dataset: ImageDataset[int], num_classes: int):
+        super(ImageOneHotDataset, self).__init__()
+        self.dataset = dataset
+        self.num_classes = num_classes
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, index: int) -> Tuple[Img, Tensor, int]:
+        img, target, index = self.dataset[index]
+        lb = F.one_hot(target, self.num_classes).type(torch.float)
+        return img, lb, index
+
+
+class ImageCutMixDataset(ImageDataset[Tensor]):
+    def __init__(self, dataset: ImageOneHotDataset, alpha: float, mode: str = 'compact', random_state: Optional[RandomState] = None):
+        super(ImageCutMixDataset, self).__init__()
+        self.dataset = dataset
+        self.alpha = alpha
+        self.mode = mode
+        self.random_state = random_state or RandomState()
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, index: int) -> Tuple[Img, Tensor, int]:
+        img1, lb1, index = self.dataset[index]
+        img2, lb2, _ = self.dataset[self.random_state.randint(len(self.dataset))]
+
+        img1, img2 = VTF.to_tensor(img1), VTF.to_tensor(img2)
+        img, lb = cutmix(img1, lb1, img2, lb2, self.alpha, self.mode, self.random_state)
+        img = VTF.to_pil_image(img)
+
+        return img, lb, -1
+
+
+class ImageMixupDataset(ImageDataset[Tensor]):
+    def __init__(self, dataset: ImageOneHotDataset, alpha: float, random_state: Optional[RandomState] = None):
+        super(ImageMixupDataset, self).__init__()
+        self.dataset = dataset
+        self.alpha = alpha
+        self.random_state = random_state or RandomState()
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, index: int) -> Tuple[Img, Tensor, int]:
+        img1, lb1, index = self.dataset[index]
+        img2, lb2, _ = self.dataset[self.random_state.randint(len(self.dataset))]
+
+        img1, img2 = VTF.to_tensor(img1), VTF.to_tensor(img2)
+        img, lb = mixup(img1, lb1, img2, lb2, self.alpha, self.random_state)
+        img = VTF.to_pil_image(img)
+
+        return img, lb, -1
 
 
 class TransformDataset(Dataset):

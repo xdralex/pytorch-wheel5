@@ -21,7 +21,7 @@ class ExactMatchAccuracy(Accuracy):
         super(ExactMatchAccuracy, self).__init__()
 
     def forward(self, y: Tensor, z: Tensor, y_probs: Tensor, y_hat: Tensor) -> Tuple[float, float]:
-        return exact_match_accuracy(y, z, y_probs, y_hat)
+        return exact_match_accuracy(y, y_hat)
 
 
 class JaccardAccuracy(Accuracy):
@@ -29,4 +29,4 @@ class JaccardAccuracy(Accuracy):
         super(JaccardAccuracy, self).__init__()
 
     def forward(self, y: Tensor, z: Tensor, y_probs: Tensor, y_hat: Tensor) -> Tuple[float, float]:
-        return jaccard_accuracy(y, z, y_probs, y_hat)
+        return jaccard_accuracy(y, y_probs)
