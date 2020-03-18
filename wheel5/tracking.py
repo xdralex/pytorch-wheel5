@@ -15,10 +15,6 @@ from torch.nn import Module
 from torch.optim.optimizer import Optimizer
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
-from torchvision.transforms import ToPILImage
-
-from .dataset import TransformDataset
-from .visualization import visualize_cm, visualize_top_errors
 
 
 # TODO: use state_dict() to serialize model/optimizer
