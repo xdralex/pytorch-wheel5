@@ -9,6 +9,7 @@ from torch import Tensor
 from torch.nn import Module
 from torch.optim.optimizer import Optimizer
 from torch.nn.functional import log_softmax
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from .cuda import memory_stats
@@ -170,9 +171,9 @@ class PredictEpochHandler(EpochHandler):
 def fit(device: Union[torch.device, int],
         model: Module,
         classes: List[str],
-        train_processor: DataProcessor,
-        val_processor: DirectDataProcessor,
-        ctrl_processor: DirectDataProcessor,
+        train_loader: DataLoader,
+        val_loader: DataLoader,
+        ctrl_loader: DataLoader,
         train_loss: Module,
         eval_loss: Module,
         train_accuracy: Accuracy,
@@ -201,13 +202,13 @@ def fit(device: Union[torch.device, int],
             train_handler, val_handler, ctrl_handler = main_train_handler, main_val_handler, main_ctrl_handler
             train_optimizer, train_scheduler = optimizer, scheduler
 
-        train_metrics = run_epoch(device, model, train_processor, train_loss, train_optimizer, train_scheduler, train_handler, display_progress=display_progress)
-        val_metrics = run_epoch(device, model, val_processor, eval_loss, None, None, val_handler, display_progress=display_progress)
-        ctrl_metrics = run_epoch(device, model, ctrl_processor, eval_loss, None, None, ctrl_handler, display_progress=display_progress)
+        train_metrics = run_epoch(device, model, train_loader, train_loss, train_optimizer, train_scheduler, train_handler, display_progress=display_progress)
+        val_metrics = run_epoch(device, model, val_loader, eval_loss, None, None, val_handler, display_progress=display_progress)
+        ctrl_metrics = run_epoch(device, model, ctrl_loader, eval_loss, None, None, ctrl_handler, display_progress=display_progress)
 
         if tracker.tensorboard_cfg.track_predictions:
             predict_handler = PredictEpochHandler()
-            prediction = run_epoch(device, model, val_processor, None, None, None, predict_handler, display_progress=display_progress)
+            prediction = run_epoch(device, model, val_loader, None, None, None, predict_handler, display_progress=display_progress)
         else:
             prediction = None
 
@@ -226,13 +227,13 @@ def fit(device: Union[torch.device, int],
                                     ctrl_samples=ctrl_handler.fixed_samples_meter.value(),
                                     classes=classes,
                                     prediction=prediction,
-                                    prediction_dataset=val_processor.dataset,
+                                    prediction_dataset=val_loader.dataset,
                                     optimizer_group_names=group_names)
 
 
 def score_blend(device: Union[torch.device, int],
                 models: List[Module],
-                processor: DirectDataProcessor,
+                loader: DataLoader,
                 eval_loss: Module,
                 display_progress: bool = True) -> Dict[str, Union[int, float]]:
     assert len(models) > 0
@@ -244,7 +245,7 @@ def score_blend(device: Union[torch.device, int],
         model_device = model.to(device)
 
         handler = PredictEpochHandler()
-        results = run_epoch(device, model_device, processor, None, None, None, handler, display_progress=display_progress)
+        results = run_epoch(device, model_device, loader, None, None, None, handler, display_progress=display_progress)
 
         order = torch.argsort(results.indices)
         y_ordered = torch.index_select(results.y, dim=0, index=order)
@@ -275,7 +276,7 @@ def score_blend(device: Union[torch.device, int],
 
 def run_epoch(device: Union[torch.device, int],
               model: Module,
-              processor: DataProcessor,
+              loader: DataLoader,
               loss: Optional[Module],
               optimizer: Optional[Optimizer],
               scheduler: Optional[Any],
@@ -288,7 +289,7 @@ def run_epoch(device: Union[torch.device, int],
             stats = memory_stats(device)
             logger.debug(f'{context} - [{device}] alloc/cache = {stats["allocated"]:.0f} MB / {stats["cached"]:.0f} MB')
 
-    batches_count = math.ceil(len(processor) / processor.batch_size)
+    batches_count = math.ceil(len(loader) / loader.batch_size)
     train_mode = optimizer is not None
 
     model.train(train_mode)
@@ -299,7 +300,7 @@ def run_epoch(device: Union[torch.device, int],
             handler.epoch_started()
             progress_bar.set_description(handler.state_repr())
 
-            for i, (x_cpu, y_cpu, indices) in enumerate(processor):
+            for i, (x_cpu, y_cpu, indices) in enumerate(loader):
                 log_status('  started batch')
 
                 x = x_cpu.to(device)

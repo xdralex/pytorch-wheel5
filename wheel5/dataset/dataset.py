@@ -192,17 +192,17 @@ class ImageMixupDataset(ImageDataset[Tensor]):
 
 
 class TransformDataset(Dataset):
-    def __init__(self, wrapped: Dataset, transform: Callable[[Img], Img]):
+    def __init__(self, dataset: Dataset, transform: Callable[[Img], Img]):
         super(TransformDataset, self).__init__()
 
-        self.wrapped = wrapped
+        self.dataset = dataset
         self.transform = transform
 
     def __len__(self) -> int:
-        return len(self.wrapped)
+        return len(self.dataset)
 
     def __getitem__(self, index: int):
-        item_tuple = self.wrapped[index]
+        item_tuple = self.dataset[index]
         item_list = list(item_tuple)
 
         image = item_list[0]
@@ -213,13 +213,13 @@ class TransformDataset(Dataset):
 
 
 class AlbumentationsDataset(TransformDataset):
-    def __init__(self, wrapped: Dataset, transform: albu.BasicTransform):
+    def __init__(self, dataset: Dataset, transform: albu.BasicTransform):
         def callable_transform(image: Img) -> Img:
             image_arr = np.array(image)
             aug_arr = transform(image=image_arr)
             return Image.fromarray(aug_arr['image'])
 
-        super(AlbumentationsDataset, self).__init__(wrapped, callable_transform)
+        super(AlbumentationsDataset, self).__init__(dataset, callable_transform)
 
 
 class SequentialSubsetSampler(Sampler):
