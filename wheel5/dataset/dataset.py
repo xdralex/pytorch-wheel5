@@ -144,6 +144,7 @@ class ImageOneHotDataset(ImageDataset[Tensor]):
 
     def __getitem__(self, index: int) -> Tuple[Img, Tensor, int]:
         img, target, index = self.dataset[index]
+        target = torch.tensor(target)
         lb = F.one_hot(target, self.num_classes).type(torch.float)
         return img, lb, index
 
