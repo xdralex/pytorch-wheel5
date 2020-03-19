@@ -17,18 +17,19 @@ def class_distribution(targets: List[int], classes: int) -> np.ndarray:
 
 def mixup(img1: Tensor, lb1: Tensor,
           img2: Tensor, lb2: Tensor,
-          alpha: float, random_state: Optional[RandomState] = None) -> Tuple[Tensor, Tensor]:
-    # img shape: (N, F, H, W)
-    # lb shape: (N, C)
+          alpha: float,
+          random_state: Optional[RandomState] = None) -> Tuple[Tensor, Tensor]:
+    # img shape: (F, H, W)
+    # lb shape: (C)
 
     random_state = random_state or RandomState()
     q = random_state.beta(a=alpha, b=alpha)
 
     with torch.no_grad():
+        assert len(img1.shape) == 3 and len(img2.shape) == 3
+        assert len(lb1.shape) == 1 and len(lb2.shape) == 1
         assert img1.shape == img2.shape
         assert lb1.shape == lb2.shape
-        assert len(img1.shape) == 4
-        assert len(lb1.shape) == 2
 
         img = torch.lerp(img1, img2, weight=q)
         lb = torch.lerp(lb1, lb2, weight=q)
@@ -36,27 +37,12 @@ def mixup(img1: Tensor, lb1: Tensor,
         return img, lb
 
 
-def rand_bbox(w: int, h: int, q: float, random_state: Optional[RandomState] = None) -> Tuple[int, int, int, int]:
-    random_state = random_state or RandomState()
-
-    factor = np.sqrt(q)
-    patch_w, patch_h = int(np.round(w * factor)), int(np.round(h * factor))
-
-    cx, cy = random_state.randint(w), random_state.randint(h)
-
-    bb_x1 = int(np.clip(cx - patch_w // 2, 0, w))
-    bb_y1 = int(np.clip(cy - patch_h // 2, 0, h))
-    bb_x2 = int(np.clip(cx + patch_w // 2, 0, w))
-    bb_y2 = int(np.clip(cy + patch_h // 2, 0, h))
-
-    return bb_x1, bb_y1, bb_x2, bb_y2
-
-
-def cutmix(img1: Tensor, lb1: Tensor,
-           img2: Tensor, lb2: Tensor,
-           alpha: float, mode: str = 'compact', random_state: Optional[RandomState] = None) -> Tuple[Tensor, Tensor]:
-    # img shape: (N, F, H, W)
-    # lb shape: (N, C)
+def cutmix(img_src: Tensor, lb_src: Tensor,
+           img_dst: Tensor, lb_dst: Tensor,
+           alpha: float, mode: str = 'compact',
+           random_state: Optional[RandomState] = None) -> Tuple[Tensor, Tensor]:
+    # img shape: (F, H, W)
+    # lb shape: (C)
 
     assert mode in ['compact', 'halo', 'both']
 
@@ -67,18 +53,37 @@ def cutmix(img1: Tensor, lb1: Tensor,
         q = 1 - q
 
     with torch.no_grad():
-        assert img1.shape == img2.shape
-        assert lb1.shape == lb2.shape
-        assert len(img1.shape) == 4
-        assert len(lb1.shape) == 2
+        assert len(img_src.shape) == 3 and len(img_dst.shape) == 3
+        assert len(lb_src.shape) == 1 and len(lb_dst.shape) == 1
+        assert img_src.shape[0] == img_dst.shape[0]
+        assert lb_src.shape == lb_dst.shape
 
-        h, w = img1.shape[-2:]
-        bb_x1, bb_y1, bb_x2, bb_y2 = rand_bbox(h, w, q, random_state)
+        src_h, src_w = img_src.shape[1:]
+        dst_h, dst_w = img_dst.shape[1:]
 
-        img = img2.clone()
-        img[:, :, bb_y1:bb_y2, bb_x1:bb_x2] = img1[:, :, bb_y1:bb_y2, bb_x1:bb_x2]
+        factor = np.sqrt(q)
+        patch_h, patch_w = int(np.round(dst_h * factor)), int(np.round(dst_w * factor))
+        patch_h, patch_w = min(patch_h, src_h), min(patch_w, src_w)
 
-        weight = 1.0 - (bb_y2 - bb_y1) * (bb_x2 - bb_x1) / float(h * w)
-        lb = torch.lerp(lb1, lb2, weight=weight)
+        dst_cy = random_state.randint(dst_h)
+        dst_cx = random_state.randint(dst_w)
+
+        dst_y1 = int(np.clip(dst_cy - patch_h // 2, 0, dst_h))
+        dst_y2 = int(np.clip(dst_cy + patch_h // 2, 0, dst_h))
+        dst_x1 = int(np.clip(dst_cx - patch_w // 2, 0, dst_w))
+        dst_x2 = int(np.clip(dst_cx + patch_w // 2, 0, dst_w))
+
+        patch_h, patch_w = dst_y2 - dst_y1, dst_x2 - dst_x1
+
+        src_y1 = random_state.randint(src_h - patch_h + 1)
+        src_y2 = src_y1 + patch_h
+        src_x1 = random_state.randint(src_w - patch_w + 1)
+        src_x2 = src_x1 + patch_w
+
+        img = img_dst.clone()
+        img[:, dst_y1:dst_y2, dst_x1:dst_x2] = img_src[:, src_y1:src_y2, src_x1:src_x2]
+
+        weight = float(patch_h * patch_w) / float(dst_h * dst_w)
+        lb = torch.lerp(lb_dst, lb_src, weight=weight)
 
         return img, lb
