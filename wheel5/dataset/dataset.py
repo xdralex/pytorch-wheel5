@@ -23,16 +23,7 @@ from torchvision.transforms import functional as VTF
 from .functional import cutmix, mixup
 
 
-T = TypeVar('T')
-
-
-class ImageDataset(ABC, Generic[T], Dataset):
-    @abstractmethod
-    def __getitem__(self, index: int) -> Tuple[Img, T, int]:
-        pass
-
-
-class LMDBImageDataset(ImageDataset[T]):
+class LMDBImageDataset(Dataset):
     r"""A dataset storing images in the LMDB store.
 
     This dataset takes a user-provided dataframe ['path', 'target', ...] to
@@ -113,7 +104,7 @@ class LMDBImageDataset(ImageDataset[T]):
     def __len__(self) -> int:
         return self.df.shape[0]
 
-    def __getitem__(self, index: int) -> Tuple[Img, T, int]:
+    def __getitem__(self, index: int) -> Tuple[Img, Any, int]:
         row = self.df.iloc[index, :]
         target = row['target']
 
@@ -129,12 +120,12 @@ class LMDBImageDataset(ImageDataset[T]):
 
         return image, target, index
 
-    def targets(self) -> List[T]:
+    def targets(self) -> List[Any]:
         return self.df['target'].tolist()
 
 
-class ImageOneHotDataset(ImageDataset[Tensor]):
-    def __init__(self, dataset: ImageDataset[int], num_classes: int):
+class ImageOneHotDataset(Dataset):
+    def __init__(self, dataset: Dataset, num_classes: int):
         super(ImageOneHotDataset, self).__init__()
         self.dataset = dataset
         self.num_classes = num_classes
@@ -149,8 +140,8 @@ class ImageOneHotDataset(ImageDataset[Tensor]):
         return img, lb, index
 
 
-class ImageCutMixDataset(ImageDataset[Tensor]):
-    def __init__(self, dataset: ImageOneHotDataset, alpha: float, mode: str = 'compact', random_state: Optional[RandomState] = None):
+class ImageCutMixDataset(Dataset):
+    def __init__(self, dataset: Dataset, alpha: float, mode: str = 'compact', random_state: Optional[RandomState] = None):
         super(ImageCutMixDataset, self).__init__()
         self.dataset = dataset
         self.alpha = alpha
@@ -171,8 +162,8 @@ class ImageCutMixDataset(ImageDataset[Tensor]):
         return img, lb, -1
 
 
-class ImageMixupDataset(ImageDataset[Tensor]):
-    def __init__(self, dataset: ImageOneHotDataset, alpha: float, random_state: Optional[RandomState] = None):
+class ImageMixupDataset(Dataset):
+    def __init__(self, dataset: Dataset, alpha: float, random_state: Optional[RandomState] = None):
         super(ImageMixupDataset, self).__init__()
         self.dataset = dataset
         self.alpha = alpha
