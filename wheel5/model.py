@@ -289,7 +289,7 @@ def run_epoch(device: Union[torch.device, int],
             stats = memory_stats(device)
             logger.debug(f'{context} - [{device}] alloc/cache = {stats["allocated"]:.0f} MB / {stats["cached"]:.0f} MB')
 
-    batches_count = math.ceil(len(loader) / loader.batch_size)
+    batches_count = len(loader)
     train_mode = optimizer is not None
 
     model.train(train_mode)
