@@ -4,29 +4,29 @@ import torch
 from torch import Tensor
 
 
-def exact_match_accuracy(y: Tensor, y_hat: Tensor) -> Tuple[float, float]:
-    assert y.ndim == 1
-    assert y_hat.ndim == 1
-    assert y.shape == y_hat.shape
+def exact_match_accuracy(input: Tensor, target: Tensor) -> Tuple[Tensor, Tensor]:
+    assert target.ndim == 1
+    assert input.ndim == 1
+    assert target.shape == input.shape
 
-    correct = float(torch.sum(y_hat == y))
-    total = float(y.shape[0])
+    correct = torch.sum(input == target)
+    total = input.new_tensor(target.shape[0])
 
     return correct, total
 
 
-def jaccard_accuracy(y: Tensor, y_probs: Tensor) -> Tuple[float, float]:
-    assert y.ndim == 2
-    assert y_probs.ndim == 2
-    assert y.shape == y_probs.shape
+def jaccard_accuracy(input: Tensor, target: Tensor) -> Tuple[Tensor, Tensor]:
+    assert target.ndim == 2
+    assert input.ndim == 2
+    assert target.shape == input.shape
 
-    correct = 0.0
-    total = 0.0
-    for i in range(0, y.shape[0]):
-        intersection = torch.min(y[i], y_probs[i])
-        union = torch.max(y[i], y_probs[i])
+    correct = input.new_zeros(1)
+    total = input.new_zeros(1)
+    for i in range(0, target.shape[0]):
+        intersection = torch.min(target[i], input[i])
+        union = torch.max(target[i], input[i])
 
-        correct += float(torch.sum(intersection))
-        total += float(torch.sum(union))
+        correct += torch.sum(intersection)
+        total += torch.sum(union)
 
     return correct, total
