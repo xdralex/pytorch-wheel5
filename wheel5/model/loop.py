@@ -13,7 +13,6 @@ from tqdm import tqdm
 
 from ..cuda import memory_stats
 from ..metering import AverageMeter, AccuracyMeter, ArrayAccumMeter, ReservoirSamplingMeter, LimitedSamplingMeter
-from ..metrics import Accuracy
 
 
 class TrainEvalSample(NamedTuple):
@@ -51,7 +50,7 @@ class EpochHandler(ABC):
 
 
 class TrainEvalEpochHandler(EpochHandler):
-    def __init__(self, kind, num_epochs, accuracy: Accuracy, sampled_epochs=-1, samples=8):
+    def __init__(self, kind, num_epochs, accuracy: 'Accuracy', sampled_epochs=-1, samples=8):
         self.accuracy = accuracy
 
         self.loss_meter = AverageMeter()
