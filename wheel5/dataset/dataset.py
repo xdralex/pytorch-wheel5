@@ -120,9 +120,6 @@ class LMDBImageDataset(Dataset):
 
         return image, target, index
 
-    def targets(self) -> List[Any]:
-        return self.df['target'].tolist()
-
 
 class ImageOneHotDataset(Dataset):
     def __init__(self, dataset: Dataset, num_classes: int):
@@ -223,3 +220,15 @@ class SequentialSubsetSampler(Sampler):
 
     def __len__(self):
         return len(self.indices)
+
+
+def targets(dataset: Dataset) -> List[Any]:
+    result = []
+    for i in range(0, len(dataset)):
+        item_tuple = dataset[i]
+        item_list = list(item_tuple)
+
+        target = item_list[1]
+        result.append(target)
+
+    return result
