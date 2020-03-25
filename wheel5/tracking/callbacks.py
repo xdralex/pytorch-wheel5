@@ -1,6 +1,7 @@
 import abc
 from typing import Dict, List
 
+import pandas as pd
 import pytorch_lightning as pl
 import torch
 from matplotlib.figure import Figure
@@ -10,7 +11,7 @@ from .tracker import TrialTracker
 
 
 class ProbesInterface(abc.ABC):
-    def probe_epoch_main_metrics(self) -> Dict[str, float]:
+    def probe_epoch_fit_metrics(self) -> Dict[str, float]:
         pass
 
     def probe_epoch_aux_metrics(self) -> Dict[str, float]:
@@ -30,7 +31,8 @@ class TensorboardLogging(pl.Callback):
     def on_epoch_end(self, trainer: pl.Trainer, module: pl.LightningModule):
         if isinstance(module, ProbesInterface) and isinstance(module, pl.LightningModule):
             # Logging metrics
-            module.logger.log_metrics(module.probe_epoch_main_metrics(), step=trainer.current_epoch)
+            fit_metrics = {f'fit/{k}': v for k, v in module.probe_epoch_fit_metrics().items()}
+            module.logger.log_metrics(fit_metrics, step=trainer.current_epoch)
             module.logger.log_metrics(module.probe_epoch_aux_metrics(), step=trainer.current_epoch)
 
             # Logging histograms
@@ -53,9 +55,19 @@ class StatisticsTracking(pl.Callback):
         super(StatisticsTracking, self).__init__()
         self.tracker = tracker
 
+        self.metrics_list = []
+
     def on_epoch_end(self, trainer: pl.Trainer, module: pl.LightningModule):
         if isinstance(module, ProbesInterface) and isinstance(module, pl.LightningModule):
-            self.tracker.epoch_completed(module.probe_epoch_main_metrics())
+            metrics = dict(module.probe_epoch_fit_metrics())
+            metrics['epoch'] = trainer.current_epoch
+
+            self.tracker.epoch_completed(metrics)
+            self.metrics_list.append(metrics)
 
     def on_train_end(self, trainer: pl.Trainer, module: pl.LightningModule):
         self.tracker.trial_completed()
+
+    def metrics_df(self):
+        return pd.DataFrame(self.metrics_list)
+
