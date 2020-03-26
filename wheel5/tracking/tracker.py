@@ -4,6 +4,7 @@ import logging
 import math
 import os
 import pathlib
+from collections import OrderedDict
 from typing import Dict, Optional
 
 import pandas as pd
@@ -58,17 +59,17 @@ class Tracker(object):
         return pd.DataFrame(data=entries)
 
     @staticmethod
-    def load_trial_stats(root: str, experiment: str) -> Optional[pd.DataFrame]:
+    def load_trial_stats(root: str, experiment: str, complete_only: bool = True) -> Optional[pd.DataFrame]:
         experiment_df = None
 
         directory = os.path.join(root, experiment)
         for trial in os.listdir(directory):
             if os.path.isdir(os.path.join(directory, trial)):
-                trial_df = TrialTracker.load_trial_stats(root, experiment, trial)
+                trial_df = TrialTracker.load_trial_stats(root, experiment, trial, complete_only=complete_only)
 
                 if trial_df is not None:
                     if experiment_df is not None:
-                        experiment_df = experiment_df.append(trial_df, ignore_index=True)
+                        experiment_df = experiment_df.append(trial_df, ignore_index=True, sort=False)
                     else:
                         experiment_df = trial_df
 
@@ -90,6 +91,8 @@ class TrialTracker(object):
 
         self.metrics_list = []
         self.metrics_df = pd.DataFrame()
+
+        hparams = OrderedDict(sorted(hparams.items(), key=lambda t: t[0]))
 
         # Hyperparameters
         with open(os.path.join(self.snapshot_dir, 'hyperparameters.json'), 'x') as f:

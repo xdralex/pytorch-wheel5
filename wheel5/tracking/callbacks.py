@@ -1,4 +1,5 @@
 import abc
+from collections import OrderedDict
 from typing import Dict, List
 
 import pandas as pd
@@ -59,7 +60,7 @@ class StatisticsTracking(pl.Callback):
 
     def on_epoch_end(self, trainer: pl.Trainer, module: pl.LightningModule):
         if isinstance(module, ProbesInterface) and isinstance(module, pl.LightningModule):
-            metrics = dict(module.probe_epoch_fit_metrics())
+            metrics = OrderedDict(module.probe_epoch_fit_metrics())
             metrics['epoch'] = trainer.current_epoch
 
             self.tracker.epoch_completed(metrics)
@@ -70,4 +71,3 @@ class StatisticsTracking(pl.Callback):
 
     def metrics_df(self):
         return pd.DataFrame(self.metrics_list)
-
