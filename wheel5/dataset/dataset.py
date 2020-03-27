@@ -104,7 +104,7 @@ class LMDBImageDataset(Dataset):
     def __len__(self) -> int:
         return self.df.shape[0]
 
-    def __getitem__(self, index: int) -> Tuple[Img, Any, int]:
+    def __getitem__(self, index: int) -> Tuple[Img, Any]:
         row = self.df.iloc[index, :]
         target = row['target']
 
@@ -118,7 +118,7 @@ class LMDBImageDataset(Dataset):
             w, h = unpack('HH', v_meta)
             image = Image.frombytes('RGB', (w, h), v_data)
 
-        return image, target, index
+        return image, target
 
 
 class ImageOneHotDataset(Dataset):
@@ -130,11 +130,11 @@ class ImageOneHotDataset(Dataset):
     def __len__(self) -> int:
         return len(self.dataset)
 
-    def __getitem__(self, index: int) -> Tuple[Img, Tensor, int]:
+    def __getitem__(self, index: int) -> Tuple[Img, Tensor]:
         img, target, index = self.dataset[index]
         target = torch.tensor(target)
         lb = F.one_hot(target, self.num_classes).type(torch.float)
-        return img, lb, index
+        return img, lb
 
 
 class ImageCutMixDataset(Dataset):
@@ -148,7 +148,7 @@ class ImageCutMixDataset(Dataset):
     def __len__(self) -> int:
         return len(self.dataset)
 
-    def __getitem__(self, index: int) -> Tuple[Img, Tensor, int]:
+    def __getitem__(self, index: int) -> Tuple[Img, Tensor]:
         img1, lb1, index = self.dataset[index]
         img2, lb2, _ = self.dataset[self.random_state.randint(len(self.dataset))]
 
@@ -156,7 +156,7 @@ class ImageCutMixDataset(Dataset):
         img, lb = cutmix(img1, lb1, img2, lb2, self.alpha, self.mode, self.random_state)
         img = VTF.to_pil_image(img)
 
-        return img, lb, -1
+        return img, lb
 
 
 class ImageMixupDataset(Dataset):
@@ -169,7 +169,7 @@ class ImageMixupDataset(Dataset):
     def __len__(self) -> int:
         return len(self.dataset)
 
-    def __getitem__(self, index: int) -> Tuple[Img, Tensor, int]:
+    def __getitem__(self, index: int) -> Tuple[Img, Tensor]:
         img1, lb1, index = self.dataset[index]
         img2, lb2, _ = self.dataset[self.random_state.randint(len(self.dataset))]
 
@@ -177,7 +177,7 @@ class ImageMixupDataset(Dataset):
         img, lb = mixup(img1, lb1, img2, lb2, self.alpha, self.random_state)
         img = VTF.to_pil_image(img)
 
-        return img, lb, -1
+        return img, lb
 
 
 class TransformDataset(Dataset):

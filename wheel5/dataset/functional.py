@@ -25,7 +25,7 @@ def mixup(img1: Tensor, lb1: Tensor,
     # lb shape: (C)
 
     random_state = random_state or RandomState()
-    q = random_state.beta(a=alpha, b=alpha)
+    q = alpha  # random_state.beta(a=alpha, b=alpha)
 
     with torch.no_grad():
         assert len(img1.shape) == 3 and len(img2.shape) == 3
