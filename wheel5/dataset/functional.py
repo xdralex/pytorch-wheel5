@@ -1,9 +1,8 @@
-from typing import Optional, Tuple, List
-
 import numpy as np
 import torch
 from numpy.random.mtrand import RandomState
 from torch import Tensor
+from typing import Optional, Tuple, List
 
 
 def class_distribution(targets: List[int], classes: int) -> np.ndarray:
@@ -25,7 +24,7 @@ def mixup(img1: Tensor, lb1: Tensor,
     # lb shape: (C)
 
     random_state = random_state or RandomState()
-    q = alpha  # random_state.beta(a=alpha, b=alpha)
+    q = random_state.beta(a=alpha, b=alpha)
 
     with torch.no_grad():
         assert len(img1.shape) == 3 and len(img2.shape) == 3

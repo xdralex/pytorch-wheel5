@@ -1,9 +1,8 @@
-from abc import ABC, abstractmethod
 import hashlib
+import logging
 import os
 import pathlib
 from struct import pack, unpack
-from typing import Callable, Tuple, Any, List, TypeVar, Generic, Optional
 
 import albumentations as albu
 import lmdb
@@ -15,11 +14,12 @@ from PIL.Image import Image as Img
 from numpy.random.mtrand import RandomState
 from pandas.util import hash_pandas_object
 from torch import Tensor
-from torch.utils.data import Dataset, Sampler
 from torch.nn import functional as F
+from torch.utils.data import Dataset
 from torchvision.transforms import functional as VTF
+from typing import Callable, Tuple, Any, List
 
-
+from wheel5.random import generate_random_seed
 from .functional import cutmix, mixup
 
 
@@ -131,50 +131,90 @@ class ImageOneHotDataset(Dataset):
         return len(self.dataset)
 
     def __getitem__(self, index: int) -> Tuple[Img, Tensor]:
-        img, target, index = self.dataset[index]
+        img, target = self.dataset[index]
         target = torch.tensor(target)
         lb = F.one_hot(target, self.num_classes).type(torch.float)
         return img, lb
 
 
 class ImageCutMixDataset(Dataset):
-    def __init__(self, dataset: Dataset, alpha: float, mode: str = 'compact', random_state: Optional[RandomState] = None):
+    def __init__(self, dataset: Dataset, alpha: float, mode: str = 'compact', name: str = ''):
         super(ImageCutMixDataset, self).__init__()
         self.dataset = dataset
         self.alpha = alpha
         self.mode = mode
-        self.random_state = random_state or RandomState()
+
+        self.name = name
+        self.logger = logging.getLogger(f'{__name__}')
+        self.debug = self.logger.isEnabledFor(logging.DEBUG)
+
+        self._random_state = None
+
+    @property
+    def random_state(self) -> RandomState:
+        if not self._random_state:
+            seed = generate_random_seed()
+            self._random_state = RandomState(seed)
+
+            self.logger.info(f'cutmix[{self.name}] - initialized random state [seed={seed}]')
+
+            return self._random_state
 
     def __len__(self) -> int:
         return len(self.dataset)
 
     def __getitem__(self, index: int) -> Tuple[Img, Tensor]:
-        img1, lb1, index = self.dataset[index]
-        img2, lb2, _ = self.dataset[self.random_state.randint(len(self.dataset))]
+        choice = self.random_state.randint(len(self.dataset))
+
+        img1, lb1 = self.dataset[index]
+        img2, lb2 = self.dataset[choice]
+
+        if self.debug:
+            self.logger.debug(f'index={index}, choice={choice}')
 
         img1, img2 = VTF.to_tensor(img1), VTF.to_tensor(img2)
-        img, lb = cutmix(img1, lb1, img2, lb2, self.alpha, self.mode, self.random_state)
+        img, lb = cutmix(img1, lb1, img2, lb2, self.alpha, self.mode, random_state=self.random_state)
         img = VTF.to_pil_image(img)
 
         return img, lb
 
 
 class ImageMixupDataset(Dataset):
-    def __init__(self, dataset: Dataset, alpha: float, random_state: Optional[RandomState] = None):
+    def __init__(self, dataset: Dataset, alpha: float, name: str = ''):
         super(ImageMixupDataset, self).__init__()
         self.dataset = dataset
         self.alpha = alpha
-        self.random_state = random_state or RandomState()
+
+        self.name = name
+        self.logger = logging.getLogger(f'{__name__}')
+        self.debug = self.logger.isEnabledFor(logging.DEBUG)
+
+        self._random_state = None
+
+    @property
+    def random_state(self) -> RandomState:
+        if not self._random_state:
+            seed = generate_random_seed()
+            self._random_state = RandomState(seed)
+
+            self.logger.info(f'mixup[{self.name}] - initialized random state [seed={seed}]')
+
+            return self._random_state
 
     def __len__(self) -> int:
         return len(self.dataset)
 
     def __getitem__(self, index: int) -> Tuple[Img, Tensor]:
-        img1, lb1, index = self.dataset[index]
-        img2, lb2, _ = self.dataset[self.random_state.randint(len(self.dataset))]
+        choice = self.random_state.randint(len(self.dataset))
+
+        img1, lb1 = self.dataset[index]
+        img2, lb2 = self.dataset[choice]
+
+        if self.debug:
+            self.logger.debug(f'index={index}, choice={choice}')
 
         img1, img2 = VTF.to_tensor(img1), VTF.to_tensor(img2)
-        img, lb = mixup(img1, lb1, img2, lb2, self.alpha, self.random_state)
+        img, lb = mixup(img1, lb1, img2, lb2, self.alpha, random_state=self.random_state)
         img = VTF.to_pil_image(img)
 
         return img, lb
@@ -209,17 +249,6 @@ class AlbumentationsDataset(TransformDataset):
             return Image.fromarray(aug_arr['image'])
 
         super(AlbumentationsDataset, self).__init__(dataset, callable_transform)
-
-
-class SequentialSubsetSampler(Sampler):
-    def __init__(self, indices):
-        self.indices = indices
-
-    def __iter__(self):
-        return iter(self.indices)
-
-    def __len__(self):
-        return len(self.indices)
 
 
 def targets(dataset: Dataset) -> List[Any]:
