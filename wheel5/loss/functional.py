@@ -25,7 +25,7 @@ def soft_label_cross_entropy(input: Tensor,
     order[1], order[-1] = order[-1], order[1]
 
     # transforming p shape to (N, d_1, d_2, ..., d_K, C)
-    p = target.permute(order)               # p shape: (N, d_1, d_2, ..., d_K, C)
+    p = target.permute(order)                   # p shape: (N, d_1, d_2, ..., d_K, C)
 
     smooth_dist = smooth_dist.to(input.device)
 

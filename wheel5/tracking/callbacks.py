@@ -48,7 +48,7 @@ class TensorboardLogging(pl.Callback):
 
             # Logging figures
             for name, figure in module.probe_epoch_figures().items():
-                module.logger.experiment.add_images(name, figure, global_step=trainer.current_epoch)
+                module.logger.experiment.add_figure(name, figure, global_step=trainer.current_epoch)
 
 
 class StatisticsTracking(pl.Callback):
