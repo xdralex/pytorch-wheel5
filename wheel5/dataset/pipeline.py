@@ -158,7 +158,7 @@ class ImageCutMixDataset(Dataset):
 
             self.logger.info(f'cutmix[{self.name}] - initialized random state [seed={seed}]')
 
-            return self._random_state
+        return self._random_state
 
     def __len__(self) -> int:
         return len(self.dataset)
@@ -199,7 +199,7 @@ class ImageMixupDataset(Dataset):
 
             self.logger.info(f'mixup[{self.name}] - initialized random state [seed={seed}]')
 
-            return self._random_state
+        return self._random_state
 
     def __len__(self) -> int:
         return len(self.dataset)
