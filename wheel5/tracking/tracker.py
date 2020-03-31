@@ -28,13 +28,19 @@ class Tracker(object):
     @staticmethod
     def dict_to_key(hparams: Dict[str, float]) -> str:
         def format_float(v: float) -> str:
+            if abs(int(v) - v) < 1e-6:
+                return f'{v:.1f}'
+
+            if abs(v) < 1e-3 or abs(v) >= 1e+5:
+                return f'{v:.2e}'
+
             zeros = math.ceil(math.log10(math.fabs(v) + 1))
             if zeros < 5:
                 return f'{v:.{5 - zeros}f}'
             else:
                 return f'{v:.1f}'
 
-        return '-'.join([f'{k}_{format_float(v)}' for k, v in hparams.items()])
+        return ', '.join([f'{k}={format_float(v)}' for k, v in hparams.items()])
 
     @staticmethod
     def load_experiment_stats(root: str) -> pd.DataFrame:
