@@ -15,9 +15,6 @@ def logit_to_score(class_index: Optional[int] = None) -> Callable[..., torch.Ten
         else:
             score = logit[:, class_index]
 
-        assert score.shape == 1
-        assert score.shape[0] == n
-
         return score
 
     return fn
