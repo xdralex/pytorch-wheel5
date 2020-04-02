@@ -38,43 +38,84 @@ class GradCAM(object):
 
         self.entered = True
 
-    def generate(self, input: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        # input - shape: (N, F, H, W)
+    def generate(self, input: torch.Tensor, inter_mode: str = 'bilinear') -> torch.Tensor:
+        # input - shape: (1, F, H, W)
 
-        # with torch.enable_grad():
-        n, f, h, w = input.shape
+        assert len(input.shape) == 4
+        assert input.shape[0] == 1
 
-        output = self.model(input)
-        score = self.score_fn(output)                                   # dy_c - shape: (N)
+        with torch.enable_grad():
+            n, f, h, w = input.shape
 
-        assert len(score.shape) == 1
-        assert score.shape[0] == n
+            output: torch.Tensor = self.model(input)                        # y - shape: (1, C)
+            assert len(output.shape) == 2
+            assert output.shape[0] == 1
 
-        self.model.zero_grad()
-        score.backward()
+            score = self.score_fn(output)                                   # dy_c - scalar
 
-        activations: torch.Tensor = self.activations_closure.value      # A - shape: (N, K, U, V)
-        gradients: torch.Tensor = self.gradients_closure.value          # dy_c / dA - shape: (N, K, U, V)
+            # print(f'output={output.shape}')
+            # print(f'score={score.shape}')
+            #
+            # print(f'output.value={output}')
+            # print(f'score.value={score}')
 
-        _, k, u, v = gradients.shape
+            assert len(score.shape) == 1
+            assert score.shape[0] == n
 
-        alpha = gradients.view(n, k, -1).mean(dim=2)                    # averaging over UxV for each A_k - shape: (N, K)
-        weights = alpha.view(n, k, 1, 1)                                # shape: (N, K, 1, 1)
-        lin_comb = (weights * activations).sum(dim=1)                   # shape: (N, U, V)
-        saliency_map = F.relu(lin_comb)                                 # shape: (N, U, V)
+            self.model.zero_grad()
+            score.backward()
 
-        saliency_map = saliency_map.unsqueeze(dim=1)                    # shape: (N, 1, H, W)
-        saliency_map = F.upsample(saliency_map,                         # shape: (N, 1, H, W)
-                                  size=(h, w),
-                                  mode='bilinear',
-                                  align_corners=False)
-        saliency_map = saliency_map.squeeze(dim=1)                      # shape: (N, 1, H, W)
+            activations: torch.Tensor = self.activations_closure.value      # A - shape: (1, K, U, V)
+            gradients: torch.Tensor = self.gradients_closure.value          # dy^c / dA - shape: (1, K, U, V)
 
-        saliency_min = saliency_map.min()
-        saliency_max = saliency_map.max()
+        with torch.no_grad():
+            # print(f'activations={activations.shape}')
+            # print(f'gradients={gradients.shape}')
+            #
+            # print(f'activations.value={activations}')
+            # print(f'gradients.value={gradients}')
 
-        saliency_map = (saliency_map - saliency_min) / (saliency_max - saliency_min)
-        return saliency_map, output, score
+            _, k, u, v = gradients.shape
+
+            alpha = gradients.view(n, k, -1).mean(dim=2)                    # avg over UxV for each A_k - shape: (1, K)
+            weights = alpha.view(n, k, 1, 1)                                # α^c_k - shape: (1, K, 1, 1)
+
+            # print(f'alpha={alpha.shape}')
+            # print(f'weights={weights.shape}')
+            #
+            # print(f'alpha.value={alpha}')
+            # print(f'weights.value={weights}')
+
+            lin_comb = (weights * activations).sum(dim=1)                   # shape: (1, U, V)
+            saliency_map = F.relu(lin_comb)                                 # L^c - shape: (1, U, V)
+
+            # print(f'lin_comb={lin_comb.shape}')
+            # print(f'saliency_map={saliency_map.shape}')
+            #
+            # print(f'lin_comb.value={lin_comb}')
+            # print(f'saliency_map.value={saliency_map}')
+
+            saliency_map = saliency_map.unsqueeze(dim=1)                    # shape: (1, 1, U, V)
+
+            align_corners = False if inter_mode in ['linear', 'bilinear', 'bicubic', 'trilinear'] else None
+            saliency_map = F.interpolate(saliency_map,  # shape: (N, 1, H, W)
+                                         size=(h, w),
+                                         mode=inter_mode,
+                                         align_corners=align_corners)
+
+            saliency_map = saliency_map.squeeze(dim=0).squeeze(dim=0)      # shape: (H, W)
+
+            # print(f'saliency_map={saliency_map.shape}')
+            # print(f'saliency_map.value={saliency_map}')
+
+            saliency_min = saliency_map.min()
+            saliency_max = saliency_map.max()
+
+            saliency_map = (saliency_map - saliency_min) / (saliency_max - saliency_min)
+
+            # print(f'saliency_map.value={saliency_map}')
+
+            return saliency_map
 
     def close(self):
         assert self.entered

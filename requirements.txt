@@ -7,6 +7,7 @@ torchvision
 tensorflow
 albumentations
 pillow
+opencv-python
 
 pyyaml
 lmdb
