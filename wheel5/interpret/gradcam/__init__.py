@@ -1,2 +1,2 @@
-from .generator import GradCAM
-from .auxiliary import logit_to_score
+from .generator import *
+from .auxiliary import *
