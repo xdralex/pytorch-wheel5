@@ -51,9 +51,9 @@ def draw_heatmap(x: torch.Tensor,
                  entries: List[HeatmapEntry],
                  target_classes: List[str],
                  orientation: str = 'vertical',
-                 size: float = 5,
-                 fontsize: int = 9,
-                 alpha: float = 0.5):
+                 width: float = 4,
+                 height: float = 4,
+                 fontsize: int = 9):
 
     # x - shape: (N, 3, H, W)
     # y_class - shape: (N)
@@ -80,7 +80,7 @@ def draw_heatmap(x: torch.Tensor,
     else:
         raise AssertionError(f'Invalid orientation: {orientation}')
 
-    fig = plt.figure(figsize=(size * cols, size * rows))
+    fig = plt.figure(figsize=(width * cols, height * rows))
 
     for i in range(0, n):
         for j in range(0, len(entries)):
