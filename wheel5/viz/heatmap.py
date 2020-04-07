@@ -11,7 +11,7 @@ from torchvision.transforms import functional as VTF
 
 class HeatmapMode(ABC):
     @abstractmethod
-    def combine(self, image: torch.Tensor, mask: torch.Tensor):
+    def combine(self, image: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         pass
 
 
@@ -28,19 +28,19 @@ class HeatmapModeColormap(HeatmapMode):
         self.alpha = alpha
         self.colormap = colormap
 
-    def combine(self, image: torch.Tensor, mask: torch.Tensor):
+    def combine(self, image: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         # image - shape: (3, H, W)
         # mask - shape: (H, W)
 
-        heatmap = cv2.applyColorMap(np.uint8(255 * mask), cv2.COLORMAP_JET)     # shape: (H, W, 3), BGR
-        heatmap = torch.from_numpy(heatmap).permute(2, 0, 1).float() / 255      # shape: (3, H, W), BGR
-        heatmap = heatmap[[2, 1, 0]]                                            # shape: (3, H, W), RGB
+        heatmap = cv2.applyColorMap(np.uint8(255 * mask.cpu()), cv2.COLORMAP_JET)                   # shape: (H, W, 3), BGR
+        heatmap = torch.from_numpy(heatmap).to(image.device).permute(2, 0, 1).float() / 255         # shape: (3, H, W), BGR
+        heatmap = heatmap[[2, 1, 0]]                                                                # shape: (3, H, W), RGB
 
         return image * self.alpha + heatmap * (1 - self.alpha)
 
 
 class HeatmapModeBloom(HeatmapMode):
-    def combine(self, image: torch.Tensor, mask: torch.Tensor):
+    def combine(self, image: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         # image - shape: (3, H, W)
         # mask - shape: (H, W)
 
@@ -92,6 +92,6 @@ def draw_heatmap(x: torch.Tensor,
             plt.axis('off')
 
             image = entry.mode.combine(x[i], entry.mask[i])
-            plt.imshow(VTF.to_pil_image(image))
+            plt.imshow(VTF.to_pil_image(image.cpu()))
 
     return fig
