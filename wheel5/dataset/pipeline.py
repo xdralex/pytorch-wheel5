@@ -104,7 +104,7 @@ class LMDBImageDataset(Dataset):
     def __len__(self) -> int:
         return self.df.shape[0]
 
-    def __getitem__(self, index: int) -> Tuple[Img, Any]:
+    def __getitem__(self, index: int) -> Tuple[Img, Any, int]:
         row = self.df.iloc[index, :]
         target = row['target']
 
@@ -118,7 +118,20 @@ class LMDBImageDataset(Dataset):
             w, h = unpack('HH', v_meta)
             image = Image.frombytes('RGB', (w, h), v_data)
 
-        return image, target
+        return image, target, index
+
+
+class ImageTargetDataset(Dataset):
+    def __init__(self, dataset: Dataset):
+        super(ImageTargetDataset, self).__init__()
+        self.dataset = dataset
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, index: int) -> Tuple[Img, Any]:
+        img, target, *_ = self.dataset[index]
+        return img, target
 
 
 class ImageOneHotDataset(Dataset):
@@ -130,11 +143,13 @@ class ImageOneHotDataset(Dataset):
     def __len__(self) -> int:
         return len(self.dataset)
 
-    def __getitem__(self, index: int) -> Tuple[Img, Tensor]:
-        img, target = self.dataset[index]
+    def __getitem__(self, index: int):
+        img, target, *rest = self.dataset[index]
+
         target = torch.tensor(target)
         lb = F.one_hot(target, self.num_classes).type(torch.float)
-        return img, lb
+
+        return (img, lb, *rest)
 
 
 class ImageCutMixDataset(Dataset):
@@ -166,8 +181,8 @@ class ImageCutMixDataset(Dataset):
     def __getitem__(self, index: int) -> Tuple[Img, Tensor]:
         choice = self.random_state.randint(len(self.dataset))
 
-        img1, lb1 = self.dataset[index]
-        img2, lb2 = self.dataset[choice]
+        img1, lb1, *_ = self.dataset[index]
+        img2, lb2, *_ = self.dataset[choice]
 
         if self.debug:
             self.logger.debug(f'index={index}, choice={choice}')
@@ -207,8 +222,8 @@ class ImageMixupDataset(Dataset):
     def __getitem__(self, index: int) -> Tuple[Img, Tensor]:
         choice = self.random_state.randint(len(self.dataset))
 
-        img1, lb1 = self.dataset[index]
-        img2, lb2 = self.dataset[choice]
+        img1, lb1, *_ = self.dataset[index]
+        img2, lb2, *_ = self.dataset[choice]
 
         if self.debug:
             self.logger.debug(f'index={index}, choice={choice}')
@@ -230,22 +245,17 @@ class TransformDataset(Dataset):
     def __len__(self) -> int:
         return len(self.dataset)
 
-    def __getitem__(self, index: int):
-        item_tuple = self.dataset[index]
-        item_list = list(item_tuple)
-
-        image = item_list[0]
-        image = self.transform(image)
-        item_list[0] = image
-
-        return tuple(item_list)
+    def __getitem__(self, index: int) -> Tuple[Img, ...]:
+        img, *rest = self.dataset[index]
+        img = self.transform(img)
+        return (img, *rest)
 
 
 class AlbumentationsDataset(TransformDataset):
     def __init__(self, dataset: Dataset, transform: albu.BasicTransform):
-        def callable_transform(image: Img) -> Img:
-            image_arr = np.array(image)
-            aug_arr = transform(image=image_arr)
+        def callable_transform(img: Img) -> Img:
+            img_arr = np.array(img)
+            aug_arr = transform(image=img_arr)
             return Image.fromarray(aug_arr['image'])
 
         super(AlbumentationsDataset, self).__init__(dataset, callable_transform)
@@ -253,11 +263,9 @@ class AlbumentationsDataset(TransformDataset):
 
 def targets(dataset: Dataset) -> List[Any]:
     result = []
-    for i in range(0, len(dataset)):
-        item_tuple = dataset[i]
-        item_list = list(item_tuple)
 
-        target = item_list[1]
+    for i in range(0, len(dataset)):
+        _, target, *_ = dataset[i]
         result.append(target)
 
     return result
