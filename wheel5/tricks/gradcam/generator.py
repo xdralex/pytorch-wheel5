@@ -29,35 +29,6 @@ class GradCAMBase(object):
 
         self.entered = False
 
-    @staticmethod
-    def upsample(saliency_map: torch.Tensor, inter_mode: str, h: int, w: int) -> torch.Tensor:
-        # saliency_map - shape: (N, U, V)
-        n, _, _ = saliency_map.shape
-
-        align_corners = False if inter_mode in ['linear', 'bilinear', 'bicubic', 'trilinear'] else None
-
-        saliency_map = saliency_map.unsqueeze(dim=1)                        # shape: (N, 1, U, V)
-        saliency_map = F.interpolate(saliency_map,                          # shape: (N, 1, H, W)
-                                     size=(h, w),
-                                     mode=inter_mode,
-                                     align_corners=align_corners)
-        saliency_map = saliency_map.squeeze(dim=1)                          # shape: (N, H, W)
-
-        return saliency_map
-
-    @staticmethod
-    def normalize(saliency_map: torch.Tensor):
-        # saliency_map - shape: (N, H, W)
-        n, _, _ = saliency_map.shape
-
-        saliency_max, _ = saliency_map.view(n, -1).max(dim=1)
-        saliency_min, _ = saliency_map.view(n, -1).min(dim=1)
-
-        saliency_max = saliency_max.view(n, 1, 1)
-        saliency_min = saliency_min.view(n, 1, 1)
-
-        return (saliency_map - saliency_min) / (saliency_max - saliency_min)
-
     def init(self):
         assert not self.entered
 
@@ -95,7 +66,7 @@ class GradCAM(GradCAMBase):
     def __init__(self, model: nn.Module, layer: nn.Module, score_fn: Callable[..., torch.Tensor]):
         super(GradCAM, self).__init__(model, layer, score_fn)
 
-    def generate(self, input: torch.Tensor, inter_mode: Optional[str] = None) -> torch.Tensor:
+    def generate(self, input: torch.Tensor) -> torch.Tensor:
         # input - shape: (N, F, H, W)
         assert len(input.shape) == 4
 
@@ -126,10 +97,7 @@ class GradCAM(GradCAMBase):
             lin_comb = (weights * act).sum(dim=1)                           # shape: (N, U, V)
             saliency_map = F.relu(lin_comb)                                 # L^c - shape: (N, U, V)
 
-            if inter_mode is not None:
-                saliency_map = self.upsample(saliency_map, inter_mode, h, w)
-
-            return self.normalize(saliency_map)
+            return saliency_map
 
 
 # https://arxiv.org/pdf/1710.11063.pdf
@@ -137,7 +105,7 @@ class GradCAMpp(GradCAMBase):
     def __init__(self, model: nn.Module, layer: nn.Module, score_fn: Callable[..., torch.Tensor]):
         super(GradCAMpp, self).__init__(model, layer, score_fn)
 
-    def generate(self, input: torch.Tensor, inter_mode: Optional[str] = None) -> torch.Tensor:
+    def generate(self, input: torch.Tensor) -> torch.Tensor:
         # input - shape: (N, F, H, W)
         assert len(input.shape) == 4
 
@@ -174,7 +142,4 @@ class GradCAMpp(GradCAMBase):
             weights = weights_pixel.sum(dim=(2, 3), keepdim=True)           # shape: (N, K, 1, 1)
             saliency_map = (weights * act).sum(dim=1)                       # L^c - shape: (N, U, V)
 
-            if inter_mode is not None:
-                saliency_map = self.upsample(saliency_map, inter_mode, h, w)
-
-            return self.normalize(saliency_map)
+            return saliency_map
