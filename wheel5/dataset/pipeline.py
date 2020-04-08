@@ -17,7 +17,7 @@ from torch import Tensor
 from torch.nn import functional as F
 from torch.utils.data import Dataset
 from torchvision.transforms import functional as VTF
-from typing import Callable, Tuple, Any, List
+from typing import Callable, Tuple, Any, List, Dict
 
 from wheel5.random import generate_random_seed
 from .functional import cutmix, mixup
@@ -119,6 +119,23 @@ class LMDBImageDataset(Dataset):
             image = Image.frombytes('RGB', (w, h), v_data)
 
         return image, target, index
+
+
+class NdArrayStorage(object):
+    def __init__(self, arrays: Dict[str, np.ndarray]):
+        self.arrays = arrays
+
+    def save(self, path: str):
+        pathlib.Path(path).mkdir(parents=True, exist_ok=True)
+        path = os.path.join(path, 'data.npz')
+        np.savez(path, **self.arrays)
+
+    @staticmethod
+    def load(path: str) -> 'NdArrayStorage':
+        path = os.path.join(path, 'data.npz')
+        with np.load(path, allow_pickle=False) as data:
+            arrays = {k: data[k] for k in data.file}
+            return NdArrayStorage(arrays)
 
 
 class ImageTargetDataset(Dataset):
