@@ -1,8 +1,10 @@
 import hashlib
 import logging
+import math
 import os
 import pathlib
 from struct import pack, unpack
+from typing import Callable, Tuple, Any, List, Dict
 
 import albumentations as albu
 import lmdb
@@ -13,14 +15,30 @@ from PIL import Image
 from PIL.Image import Image as Img
 from numpy.random.mtrand import RandomState
 from pandas.util import hash_pandas_object
-from torch import Tensor
 from torch.nn import functional as F
 from torch.utils.data import Dataset
 from torchvision.transforms import functional as VTF
-from typing import Callable, Tuple, Any, List, Dict
 
 from wheel5.random import generate_random_seed
-from .functional import cutmix, mixup
+from wheel5.tricks.heatmap import heatmap_to_selection_mask, upsample_heatmap
+from .functional import cutmix, mixup, masked_cutmix
+
+
+class NdArrayStorage(object):
+    def __init__(self, arrays: Dict[str, np.ndarray]):
+        self.arrays = arrays
+
+    def save(self, path: str):
+        pathlib.Path(path).mkdir(parents=True, exist_ok=True)
+        path = os.path.join(path, 'data.npz')
+        np.savez(path, **self.arrays)
+
+    @staticmethod
+    def load(path: str) -> 'NdArrayStorage':
+        path = os.path.join(path, 'data.npz')
+        with np.load(path, allow_pickle=False) as data:
+            arrays = {k: data[k] for k in data.files}
+            return NdArrayStorage(arrays)
 
 
 class LMDBImageDataset(Dataset):
@@ -121,34 +139,46 @@ class LMDBImageDataset(Dataset):
         return image, target, index
 
 
-class NdArrayStorage(object):
-    def __init__(self, arrays: Dict[str, np.ndarray]):
-        self.arrays = arrays
-
-    def save(self, path: str):
-        pathlib.Path(path).mkdir(parents=True, exist_ok=True)
-        path = os.path.join(path, 'data.npz')
-        np.savez(path, **self.arrays)
-
-    @staticmethod
-    def load(path: str) -> 'NdArrayStorage':
-        path = os.path.join(path, 'data.npz')
-        with np.load(path, allow_pickle=False) as data:
-            arrays = {k: data[k] for k in data.file}
-            return NdArrayStorage(arrays)
-
-
-class ImageTargetDataset(Dataset):
-    def __init__(self, dataset: Dataset):
-        super(ImageTargetDataset, self).__init__()
+class ImageHeatmapDataset(Dataset):
+    def __init__(self, dataset: Dataset, heatmaps: NdArrayStorage, inter_mode: str = 'bilinear'):
+        super(ImageHeatmapDataset, self).__init__()
         self.dataset = dataset
+        self.heatmaps = heatmaps
+        self.inter_mode = inter_mode
 
     def __len__(self) -> int:
         return len(self.dataset)
 
-    def __getitem__(self, index: int) -> Tuple[Img, Any]:
-        img, target, *_ = self.dataset[index]
-        return img, target
+    def __getitem__(self, index: int):
+        img, target, root_index, *rest = self.dataset[index]
+        heatmap = torch.from_numpy(self.heatmaps.arrays[str(root_index)])
+
+        w, h = img.size
+
+        heatmap = heatmap.unsqueeze(dim=0)
+        heatmap = upsample_heatmap(heatmap, h, w, self.inter_mode)
+        heatmap = heatmap.squeeze(dim=0)
+
+        return (img, target, heatmap, root_index, *rest)
+
+
+class ImageSelectionMaskDataset(Dataset):
+    def __init__(self, dataset: Dataset, cutoff_ratio: float):
+        super(ImageSelectionMaskDataset, self).__init__()
+        self.dataset = dataset
+        self.cutoff_ratio = cutoff_ratio
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, index: int):
+        (img, target, heatmap, *rest) = self.dataset[index]
+
+        heatmap = heatmap.unsqueeze(dim=0)
+        mask = heatmap_to_selection_mask(heatmap, self.cutoff_ratio)
+        mask = mask.squeeze(dim=0)
+
+        return (img, target, mask, *rest)
 
 
 class ImageOneHotDataset(Dataset):
@@ -169,87 +199,107 @@ class ImageOneHotDataset(Dataset):
         return (img, lb, *rest)
 
 
-class ImageCutMixDataset(Dataset):
+class RandomStateDataset(Dataset):
+    def __init__(self, name: str = ''):
+        super(RandomStateDataset, self).__init__()
+
+        self.name = name
+        self.logger = logging.getLogger(f'{__name__}')
+        self.debug = self.logger.isEnabledFor(logging.DEBUG)
+
+        self._random_state = None
+
+    @property
+    def random_state(self) -> RandomState:
+        if not self._random_state:
+            seed = generate_random_seed()
+            self._random_state = RandomState(seed)
+
+            self.logger.info(f'dataset[{self.name}] - initialized random state [seed={seed}]')
+
+        return self._random_state
+
+
+class ImageMaskedCutMixDataset(RandomStateDataset):
+    def __init__(self, dataset: Dataset, name: str = ''):
+        super(ImageMaskedCutMixDataset, self).__init__(name)
+        self.dataset = dataset
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, index: int):
+        choice = self.random_state.randint(len(self.dataset))
+
+        img_dst, lb_dst, _, _ = self.dataset[index]
+        img_src, lb_src, mask_src, _ = self.dataset[choice]
+
+        img_dst, img_src = VTF.to_tensor(img_dst), VTF.to_tensor(img_src)
+
+        if self.debug:
+            self.logger.debug(f'index={index}, choice={choice}')
+
+        img, lb = masked_cutmix(img_src=img_src, lb_src=lb_src,
+                                img_dst=img_dst, lb_dst=lb_dst,
+                                mask_src=mask_src)
+
+        img = VTF.to_pil_image(img)
+        return img, lb, -1
+
+
+class ImageCutMixDataset(RandomStateDataset):
     def __init__(self, dataset: Dataset, alpha: float, mode: str = 'compact', name: str = ''):
-        super(ImageCutMixDataset, self).__init__()
+        super(ImageCutMixDataset, self).__init__(name)
         self.dataset = dataset
         self.alpha = alpha
         self.mode = mode
 
-        self.name = name
-        self.logger = logging.getLogger(f'{__name__}')
-        self.debug = self.logger.isEnabledFor(logging.DEBUG)
-
-        self._random_state = None
-
-    @property
-    def random_state(self) -> RandomState:
-        if not self._random_state:
-            seed = generate_random_seed()
-            self._random_state = RandomState(seed)
-
-            self.logger.info(f'cutmix[{self.name}] - initialized random state [seed={seed}]')
-
-        return self._random_state
-
     def __len__(self) -> int:
         return len(self.dataset)
 
-    def __getitem__(self, index: int) -> Tuple[Img, Tensor]:
+    def __getitem__(self, index: int):
         choice = self.random_state.randint(len(self.dataset))
 
-        img1, lb1, *_ = self.dataset[index]
-        img2, lb2, *_ = self.dataset[choice]
+        img_dst, lb_dst, _ = self.dataset[index]
+        img_src, lb_src, _ = self.dataset[choice]
+
+        img_dst, img_src = VTF.to_tensor(img_dst), VTF.to_tensor(img_src)
 
         if self.debug:
             self.logger.debug(f'index={index}, choice={choice}')
 
-        img1, img2 = VTF.to_tensor(img1), VTF.to_tensor(img2)
-        img, lb = cutmix(img1, lb1, img2, lb2, self.alpha, self.mode, random_state=self.random_state)
+        img, lb = cutmix(img_src=img_src, lb_src=lb_src,
+                         img_dst=img_dst, lb_dst=lb_dst,
+                         alpha=self.alpha, mode=self.mode, random_state=self.random_state)
+
         img = VTF.to_pil_image(img)
+        return img, lb, -1
 
-        return img, lb
 
-
-class ImageMixupDataset(Dataset):
+class ImageMixupDataset(RandomStateDataset):
     def __init__(self, dataset: Dataset, alpha: float, name: str = ''):
-        super(ImageMixupDataset, self).__init__()
+        super(ImageMixupDataset, self).__init__(name)
         self.dataset = dataset
         self.alpha = alpha
 
-        self.name = name
-        self.logger = logging.getLogger(f'{__name__}')
-        self.debug = self.logger.isEnabledFor(logging.DEBUG)
-
-        self._random_state = None
-
-    @property
-    def random_state(self) -> RandomState:
-        if not self._random_state:
-            seed = generate_random_seed()
-            self._random_state = RandomState(seed)
-
-            self.logger.info(f'mixup[{self.name}] - initialized random state [seed={seed}]')
-
-        return self._random_state
-
     def __len__(self) -> int:
         return len(self.dataset)
 
-    def __getitem__(self, index: int) -> Tuple[Img, Tensor]:
+    def __getitem__(self, index: int):
         choice = self.random_state.randint(len(self.dataset))
 
-        img1, lb1, *_ = self.dataset[index]
-        img2, lb2, *_ = self.dataset[choice]
+        img1, lb1, _ = self.dataset[index]
+        img2, lb2, _ = self.dataset[choice]
+
+        img1, img2 = VTF.to_tensor(img1), VTF.to_tensor(img2)
 
         if self.debug:
             self.logger.debug(f'index={index}, choice={choice}')
 
-        img1, img2 = VTF.to_tensor(img1), VTF.to_tensor(img2)
         img, lb = mixup(img1, lb1, img2, lb2, self.alpha, random_state=self.random_state)
-        img = VTF.to_pil_image(img)
 
-        return img, lb
+        img = VTF.to_pil_image(img)
+        return img, lb, -1
 
 
 class TransformDataset(Dataset):
@@ -262,20 +312,36 @@ class TransformDataset(Dataset):
     def __len__(self) -> int:
         return len(self.dataset)
 
-    def __getitem__(self, index: int) -> Tuple[Img, ...]:
-        img, *rest = self.dataset[index]
+    def __getitem__(self, index: int):
+        img, target, *rest = self.dataset[index]
         img = self.transform(img)
-        return (img, *rest)
+        return (img, target, *rest)
 
 
-class AlbumentationsDataset(TransformDataset):
-    def __init__(self, dataset: Dataset, transform: albu.BasicTransform):
-        def callable_transform(img: Img) -> Img:
-            img_arr = np.array(img)
-            aug_arr = transform(image=img_arr)
-            return Image.fromarray(aug_arr['image'])
+class AlbumentationsDataset(Dataset):
+    def __init__(self, dataset: Dataset, transform: albu.BasicTransform, use_mask: bool = False):
+        super(AlbumentationsDataset, self).__init__()
 
-        super(AlbumentationsDataset, self).__init__(dataset, callable_transform)
+        self.dataset = dataset
+        self.transform = transform
+
+        self.use_mask = use_mask
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, index: int):
+        if self.use_mask:
+            img, target, mask, *rest = self.dataset[index]
+            augmented = self.transform(image=np.array(img), mask=mask.numpy())
+            img = Image.fromarray(augmented['image'])
+            mask = torch.from_numpy(augmented['mask'])
+            return (img, target, mask, *rest)
+        else:
+            img, target, *rest = self.dataset[index]
+            augmented = self.transform(image=np.array(img))
+            img = Image.fromarray(augmented['image'])
+            return (img, target, *rest)
 
 
 def targets(dataset: Dataset) -> List[Any]:
