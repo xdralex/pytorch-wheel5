@@ -16,30 +16,30 @@ def class_distribution(targets: List[int], classes: int) -> np.ndarray:
     return counts
 
 
-def mixup(img1: torch.Tensor, lb1: torch.Tensor,
-          img2: torch.Tensor, lb2: torch.Tensor,
+def mixup(img_src: torch.Tensor, lb_src: torch.Tensor,
+          img_dst: torch.Tensor, lb_dst: torch.Tensor,
           alpha: float,
-          random_state: Optional[RandomState] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+          random_state: Optional[RandomState] = None) -> Tuple[torch.Tensor, torch.Tensor, float]:
     # img shape: (F, H, W)
     # lb shape: (C)
 
     random_state = random_state or RandomState()
-    q = random_state.beta(a=alpha, b=alpha)
+    weight = random_state.beta(a=alpha, b=alpha)
 
-    assert len(img1.shape) == 3 and len(img2.shape) == 3
-    assert len(lb1.shape) == 1 and len(lb2.shape) == 1
-    assert img1.shape == img2.shape
-    assert lb1.shape == lb2.shape
+    assert len(img_src.shape) == 3 and len(img_dst.shape) == 3
+    assert len(lb_src.shape) == 1 and len(lb_dst.shape) == 1
+    assert img_src.shape == img_dst.shape
+    assert lb_src.shape == lb_dst.shape
 
-    img = torch.lerp(img1, img2, weight=q)
-    lb = torch.lerp(lb1, lb2, weight=q)
+    img = torch.lerp(img_src, img_dst, weight=weight)
+    lb = torch.lerp(lb_src, lb_dst, weight=weight)
 
-    return img, lb
+    return img, lb, weight
 
 
 def masked_cutmix(img_src: torch.Tensor, lb_src: torch.Tensor,
                   img_dst: torch.Tensor, lb_dst: torch.Tensor,
-                  mask_src: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+                  mask_src: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, float]:
     # img shape: (F, H, W)
     # lb shape: (C)
     # mask shape: (H, W)
@@ -57,16 +57,16 @@ def masked_cutmix(img_src: torch.Tensor, lb_src: torch.Tensor,
     img[:, mask_src] = img_src[:, mask_src]
     img[:, ~mask_src] = img_dst[:, ~mask_src]
 
-    weight_src = float(mask_src.int().sum()) / float(mask_src.numel())
-    lb = torch.lerp(lb_dst, lb_src, weight_src)
+    weight = float(mask_src.int().sum()) / float(mask_src.numel())
+    lb = torch.lerp(lb_dst, lb_src, weight)
 
-    return img, lb
+    return img, lb, weight
 
 
 def cutmix(img_src: torch.Tensor, lb_src: torch.Tensor,
            img_dst: torch.Tensor, lb_dst: torch.Tensor,
            alpha: float, mode: str = 'compact',
-           random_state: Optional[RandomState] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+           random_state: Optional[RandomState] = None) -> Tuple[torch.Tensor, torch.Tensor, float]:
     # img shape: (F, H, W)
     # lb shape: (C)
 
@@ -111,4 +111,4 @@ def cutmix(img_src: torch.Tensor, lb_src: torch.Tensor,
     weight = float(patch_h * patch_w) / float(dst_h * dst_w)
     lb = torch.lerp(lb_dst, lb_src, weight=weight)
 
-    return img, lb
+    return img, lb, weight
