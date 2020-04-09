@@ -4,20 +4,22 @@ import torch
 import torch.nn.functional as F
 
 
-def heatmap_to_selection_mask(heatmap: torch.Tensor, h: int, w: int, cells: int, inter_mode: str) -> torch.Tensor:
-    # heatmaps shape: (N, U, V)
+def heatmap_to_selection_mask(heatmap: torch.Tensor, cutoff_ratio: float) -> torch.Tensor:
+    # heatmap shape: (N, U, V)
     n, u, v = heatmap.shape
-    assert 0 <= cells < u * v
+    assert 0 <= cutoff_ratio <= 1
 
-    if cells == 0:
+    heatmap_sorted, _ = heatmap.view(n, -1).sort(dim=1, descending=True)
+    _, cells = heatmap_sorted.shape
+
+    limit = max(min(int(round(cells * cutoff_ratio)), cells), 0)
+    if limit == 0:
         cutoff = math.inf
     else:
-        heatmap_sorted, _ = heatmap.view(n, -1).sort(dim=1, descending=True)
-        cutoff, _ = heatmap_sorted[:, 0:cells].min(dim=1)
+        cutoff, _ = heatmap_sorted[:, 0:limit].min(dim=1)
         cutoff = cutoff.view(n, 1, 1)
 
-    heatmap = upsample_heatmap(heatmap, h, w, inter_mode)
-    return torch.ge(heatmap, cutoff).int()
+    return torch.ge(heatmap, cutoff)
 
 
 def upsample_heatmap(heatmap: torch.Tensor, h: int, w: int, inter_mode: str) -> torch.Tensor:
