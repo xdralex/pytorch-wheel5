@@ -1,12 +1,10 @@
 import hashlib
 import logging
-import math
 import os
 import pathlib
 from struct import pack, unpack
 from typing import Callable, Tuple, Any, List, Dict, Union
 
-import PIL
 import albumentations as albu
 import lmdb
 import numpy as np
@@ -21,8 +19,8 @@ from torch.utils.data import Dataset
 from torchvision.transforms import functional as VTF
 
 from wheel5.random import generate_random_seed
-from wheel5.tricks.heatmap import heatmap_to_selection_mask, upsample_heatmap
-from .functional import cutmix, mixup, masked_cutmix
+from wheel5.tricks.heatmap import upsample_heatmap
+from .functional import cutmix, mixup, attentive_cutmix
 
 
 class NdArrayStorage(object):
@@ -143,6 +141,8 @@ class LMDBImageDataset(BaseDataset):
         self.df = df
         self.lmdb_env = lmdb.open(lmdb_path, readonly=True, lock=False, meminit=False, readahead=False, map_size=lmdb_map_size, subdir=True)
 
+        self.logger.info(f'dataset[{self.name}] - initialized: lmdb_path={lmdb_path}')
+
     def __len__(self) -> int:
         return self.df.shape[0]
 
@@ -167,12 +167,36 @@ class LMDBImageDataset(BaseDataset):
         return image, target, index
 
 
+class ImageOneHotDataset(BaseDataset):
+    def __init__(self, dataset: Dataset, num_classes: int, name: str = ''):
+        super(ImageOneHotDataset, self).__init__(name=name)
+        self.dataset = dataset
+        self.num_classes = num_classes
+
+        self.logger.info(f'dataset[{self.name}] - initialized: num_classes={self.num_classes}')
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, index: int):
+        img, target, native, *rest = self.dataset[index]
+        lb = F.one_hot(torch.tensor(target), self.num_classes).type(torch.float)
+
+        if self.debug:
+            self.logger.debug(f'dataset[{self.name}] - #{index}[{native}]: '
+                              f'image={shape(img)}, target={target}, lb={lb}')
+
+        return (img, lb, native, *rest)
+
+
 class ImageHeatmapDataset(BaseDataset):
     def __init__(self, dataset: Dataset, heatmaps: NdArrayStorage, inter_mode: str = 'bilinear', name: str = ''):
         super(ImageHeatmapDataset, self).__init__(name=name)
         self.dataset = dataset
         self.heatmaps = heatmaps
         self.inter_mode = inter_mode
+
+        self.logger.info(f'dataset[{self.name}] - initialized: heatmaps={len(self.heatmaps.arrays)}, inter_mode={self.inter_mode}')
 
     def __len__(self) -> int:
         return len(self.dataset)
@@ -194,53 +218,16 @@ class ImageHeatmapDataset(BaseDataset):
         return (img, target, native, upsampled, *rest)
 
 
-class ImageSelectionMaskDataset(BaseDataset):
-    def __init__(self, dataset: Dataset, cutoff_ratio: float, name: str = ''):
-        super(ImageSelectionMaskDataset, self).__init__(name=name)
+class ImageAttentiveCutMixDataset(BaseDataset):
+    def __init__(self, dataset: Dataset, alpha: float, q_min: float = 0.0, q_max: float = 1.0, mode: str = 'compact', name: str = ''):
+        super(ImageAttentiveCutMixDataset, self).__init__(name)
         self.dataset = dataset
-        self.cutoff_ratio = cutoff_ratio
+        self.alpha = alpha
+        self.q_min = q_min
+        self.q_max = q_max
+        self.mode = mode
 
-    def __len__(self) -> int:
-        return len(self.dataset)
-
-    def __getitem__(self, index: int):
-        (img, target, native, heatmap, *rest) = self.dataset[index]
-
-        heatmap_expanded = heatmap.unsqueeze(dim=0)
-        mask = heatmap_to_selection_mask(heatmap_expanded, self.cutoff_ratio)
-        mask = mask.squeeze(dim=0)
-
-        if self.debug:
-            self.logger.debug(f'dataset[{self.name}] - #{index}[{native}]: '
-                              f'image={shape(img)}, target={target}, heatmap={shape(heatmap)}, mask={shape(mask)}')
-
-        return (img, target, native, mask, *rest)
-
-
-class ImageOneHotDataset(BaseDataset):
-    def __init__(self, dataset: Dataset, num_classes: int, name: str = ''):
-        super(ImageOneHotDataset, self).__init__(name=name)
-        self.dataset = dataset
-        self.num_classes = num_classes
-
-    def __len__(self) -> int:
-        return len(self.dataset)
-
-    def __getitem__(self, index: int):
-        img, target, native, *rest = self.dataset[index]
-        lb = F.one_hot(torch.tensor(target), self.num_classes).type(torch.float)
-
-        if self.debug:
-            self.logger.debug(f'dataset[{self.name}] - #{index}[{native}]: '
-                              f'image={shape(img)}, target={target}, lb={lb}')
-
-        return (img, lb, native, *rest)
-
-
-class ImageMaskedCutMixDataset(BaseDataset):
-    def __init__(self, dataset: Dataset, name: str = ''):
-        super(ImageMaskedCutMixDataset, self).__init__(name)
-        self.dataset = dataset
+        self.logger.info(f'dataset[{self.name}] - initialized: alpha={self.alpha}, q_min={self.q_min}, q_max={self.q_max}, mode={self.mode}')
 
     def __len__(self) -> int:
         return len(self.dataset)
@@ -249,13 +236,15 @@ class ImageMaskedCutMixDataset(BaseDataset):
         choice = self.random_state.randint(len(self.dataset))
 
         img_dst, lb_dst, native_dst, _ = self.dataset[index]
-        img_src, lb_src, native_src, mask_src = self.dataset[choice]
+        img_src, lb_src, native_src, heatmap_src = self.dataset[choice]
 
         native = -1
         img_dst, img_src = VTF.to_tensor(img_dst), VTF.to_tensor(img_src)
-        img, lb, weight = masked_cutmix(img_src=img_src, lb_src=lb_src,
-                                        img_dst=img_dst, lb_dst=lb_dst,
-                                        mask_src=mask_src)
+        img, lb, weight = attentive_cutmix(img_src=img_src, lb_src=lb_src,
+                                           img_dst=img_dst, lb_dst=lb_dst,
+                                           heatmap_src=heatmap_src,
+                                           alpha=self.alpha, q_min=self.q_min, q_max=self.q_max,
+                                           mode=self.mode, random_state=self.random_state)
 
         if self.debug:
             self.logger.debug(f'dataset[{self.name}]\n'
@@ -268,11 +257,15 @@ class ImageMaskedCutMixDataset(BaseDataset):
 
 
 class ImageCutMixDataset(BaseDataset):
-    def __init__(self, dataset: Dataset, alpha: float, mode: str = 'compact', name: str = ''):
+    def __init__(self, dataset: Dataset, alpha: float, q_min: float = 0.0, q_max: float = 1.0, mode: str = 'compact', name: str = ''):
         super(ImageCutMixDataset, self).__init__(name)
         self.dataset = dataset
         self.alpha = alpha
+        self.q_min = q_min
+        self.q_max = q_max
         self.mode = mode
+
+        self.logger.info(f'dataset[{self.name}] - initialized: alpha={self.alpha}, q_min={self.q_min}, q_max={self.q_max}, mode={self.mode}')
 
     def __len__(self) -> int:
         return len(self.dataset)
@@ -287,7 +280,8 @@ class ImageCutMixDataset(BaseDataset):
         img_dst, img_src = VTF.to_tensor(img_dst), VTF.to_tensor(img_src)
         img, lb, weight = cutmix(img_src=img_src, lb_src=lb_src,
                                  img_dst=img_dst, lb_dst=lb_dst,
-                                 alpha=self.alpha, mode=self.mode, random_state=self.random_state)
+                                 alpha=self.alpha, q_min=self.q_min, q_max=self.q_max,
+                                 mode=self.mode, random_state=self.random_state)
 
         if self.debug:
             self.logger.debug(f'dataset[{self.name}]\n'
@@ -304,6 +298,8 @@ class ImageMixupDataset(BaseDataset):
         super(ImageMixupDataset, self).__init__(name)
         self.dataset = dataset
         self.alpha = alpha
+
+        self.logger.info(f'dataset[{self.name}] - initialized: alpha={self.alpha}')
 
     def __len__(self) -> int:
         return len(self.dataset)
@@ -336,6 +332,8 @@ class TransformDataset(BaseDataset):
         self.dataset = dataset
         self.transform = transform
 
+        self.logger.info(f'dataset[{self.name}] - initialized: transform={self.transform}')
+
     def __len__(self) -> int:
         return len(self.dataset)
 
@@ -356,6 +354,8 @@ class AlbumentationsDataset(BaseDataset):
         self.dataset = dataset
         self.transform = transform
         self.use_mask = use_mask
+
+        self.logger.info(f'dataset[{self.name}] - initialized: use_mask={self.use_mask}, transform={self.transform}')
 
     def __len__(self) -> int:
         return len(self.dataset)

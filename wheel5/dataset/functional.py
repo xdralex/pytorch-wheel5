@@ -4,6 +4,8 @@ import numpy as np
 import torch
 from numpy.random.mtrand import RandomState
 
+from wheel5.tricks.heatmap import heatmap_to_selection_mask
+
 
 def class_distribution(targets: List[int], classes: int) -> np.ndarray:
     counts = np.zeros(classes)
@@ -37,12 +39,26 @@ def mixup(img_src: torch.Tensor, lb_src: torch.Tensor,
     return img, lb, weight
 
 
-def masked_cutmix(img_src: torch.Tensor, lb_src: torch.Tensor,
-                  img_dst: torch.Tensor, lb_dst: torch.Tensor,
-                  mask_src: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, float]:
+def attentive_cutmix(img_src: torch.Tensor, lb_src: torch.Tensor,
+                     img_dst: torch.Tensor, lb_dst: torch.Tensor,
+                     heatmap_src: torch.Tensor,
+                     alpha: float, q_min: float = 0.0, q_max: float = 1.0, mode: str = 'compact',
+                     random_state: Optional[RandomState] = None) -> Tuple[torch.Tensor, torch.Tensor, float]:
     # img shape: (F, H, W)
     # lb shape: (C)
-    # mask shape: (H, W)
+    # heatmap shape: (H, W)
+
+    random_state = random_state or RandomState()
+    q = random_state.beta(a=alpha, b=alpha)
+
+    if (mode == 'compact' and q > 0.5) or (mode == 'halo' and q < 0.5):
+        q = 1 - q
+
+    q = min(max(q, q_min), q_max)
+
+    heatmap_expanded = heatmap_src.unsqueeze(dim=0)
+    mask_src = heatmap_to_selection_mask(heatmap_expanded, q)
+    mask_src = mask_src.squeeze(dim=0)
 
     assert len(img_src.shape) == 3 and len(img_dst.shape) == 3
     assert len(lb_src.shape) == 1 and len(lb_dst.shape) == 1
@@ -65,7 +81,7 @@ def masked_cutmix(img_src: torch.Tensor, lb_src: torch.Tensor,
 
 def cutmix(img_src: torch.Tensor, lb_src: torch.Tensor,
            img_dst: torch.Tensor, lb_dst: torch.Tensor,
-           alpha: float, mode: str = 'compact',
+           alpha: float, q_min: float = 0.0, q_max: float = 1.0, mode: str = 'compact',
            random_state: Optional[RandomState] = None) -> Tuple[torch.Tensor, torch.Tensor, float]:
     # img shape: (F, H, W)
     # lb shape: (C)
@@ -77,6 +93,8 @@ def cutmix(img_src: torch.Tensor, lb_src: torch.Tensor,
 
     if (mode == 'compact' and q > 0.5) or (mode == 'halo' and q < 0.5):
         q = 1 - q
+
+    q = min(max(q, q_min), q_max)
 
     assert len(img_src.shape) == 3 and len(img_dst.shape) == 3
     assert len(lb_src.shape) == 1 and len(lb_dst.shape) == 1
