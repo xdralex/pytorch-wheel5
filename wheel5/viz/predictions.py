@@ -11,8 +11,8 @@ def draw_predictions(x: torch.Tensor,
                      target_classes: List[str],
                      top_n: int = 5,
                      orientation: str = 'vertical',
-                     width: float = 4,
-                     height: float = 4,
+                     width: float = 5,
+                     height: float = 5,
                      fontsize: int = 9):
     # x - shape: (N, 3, H, W)
     # y_probs_hat - shape: (N, C)
@@ -36,6 +36,8 @@ def draw_predictions(x: torch.Tensor,
     fig = plt.figure(figsize=(width * cols, height * rows))
 
     for i in range(0, n):
+        print(i)
+
         plt.subplot(rows, cols, i + 1)
 
         image = x[i].cpu()

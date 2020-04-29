@@ -422,6 +422,18 @@ class AlbumentationsDataset(BaseDataset):
             return (img_aug, target, native, *rest)
 
 
+class AlbumentationsTransform(object):
+    def __init__(self, full_transform: albu.BasicTransform):
+        self.full_transform = full_transform
+
+    def __call__(self, img: Img) -> Img:
+        augmented = self.full_transform(image=np.array(img))
+        return Image.fromarray(augmented['image'])
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}({self.full_transform })'
+
+
 def shape(image: Union[Img, torch.Tensor, np.ndarray]) -> str:
     if isinstance(image, Img):
         w, h = image.size
