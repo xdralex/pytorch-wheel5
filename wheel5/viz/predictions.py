@@ -36,8 +36,6 @@ def draw_predictions(x: torch.Tensor,
     fig = plt.figure(figsize=(width * cols, height * rows))
 
     for i in range(0, n):
-        print(i)
-
         plt.subplot(rows, cols, i + 1)
 
         image = x[i].cpu()

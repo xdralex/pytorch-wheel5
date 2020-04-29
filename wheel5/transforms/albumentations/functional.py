@@ -2,7 +2,15 @@ from numbers import Number
 from typing import Union
 
 import cv2
+import numpy as np
 from albumentations.augmentations import functional as AF
+
+
+def rescale(img, scale: float, interpolation: int = cv2.INTER_AREA):
+    h, w = img.shape[:2]
+    h2, w2 = int(np.round(h * scale)), int(np.round(w * scale))
+
+    return AF.resize(img, h2, w2, interpolation)
 
 
 def pad_to_square(img, fill: Union[Number, str, tuple] = 0):
