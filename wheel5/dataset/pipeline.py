@@ -61,8 +61,45 @@ class BaseDataset(Dataset):
         return self._random_state
 
 
+class SimpleImageDataset(BaseDataset):
+    r"""A dataset loading images from the supplied directory.
+
+        This dataset takes a user-provided dataframe ['path', 'target', ...] to
+        locate the images. The 'path' column in the dataframe must point to
+        the image filename, and the 'target' column must contain the target value.
+        """
+
+    def __init__(self, df: pd.DataFrame, image_dir: str, transform: Callable[[Img], Img] = None, name: str = ''):
+        super(SimpleImageDataset, self).__init__(name=name)
+
+        self.df = df
+        self.image_dir = image_dir
+        self.transform = transform
+
+        self.logger.info(f'dataset[{self.name}] - initialized: image_dir={image_dir}')
+
+    def __len__(self) -> int:
+        return self.df.shape[0]
+
+    def __getitem__(self, index: int) -> Tuple[Img, Any, int]:
+        row = self.df.iloc[index, :]
+
+        target = row.target
+        image_path = os.path.join(self.image_dir, row.path)
+
+        image = Image.open(image_path)
+        if self.transform is not None:
+            image = self.transform(image)
+
+        if self.debug:
+            self.logger.debug(f'dataset[{self.name}] - #{index}: '
+                              f'image={shape(image)}, target={target}')
+
+        return image, target, index
+
+
 class LMDBImageDataset(BaseDataset):
-    r"""A dataset storing images in the LMDB store.
+    r"""A dataset caching images in the LMDB store.
 
     This dataset takes a user-provided dataframe ['path', 'target', ...] to
     locate the images. The 'path' column in the dataframe must point to
