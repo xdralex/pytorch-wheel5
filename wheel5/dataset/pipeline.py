@@ -23,6 +23,9 @@ from wheel5.tricks.heatmap import upsample_heatmap
 from .functional import cutmix, mixup, attentive_cutmix
 
 
+# TODO: refactor into separate classification/detection/segmentation categories
+
+
 class NdArrayStorage(object):
     def __init__(self, arrays: Dict[str, np.ndarray]):
         self.arrays = arrays
@@ -85,11 +88,40 @@ class SimpleImageDataset(BaseDataset):
         row = self.df.iloc[index, :]
 
         target = row.target
-        image_path = os.path.join(self.image_dir, row.path)
 
+        image_path = os.path.join(self.image_dir, row.path)
         image = Image.open(image_path)
         if self.transform is not None:
             image = self.transform(image)
+
+        if self.debug:
+            self.logger.debug(f'dataset[{self.name}] - #{index}: '
+                              f'image={shape(image)}, target={target}')
+
+        return image, target, index
+
+
+class SimpleImageDetectionDataset(BaseDataset):
+
+    def __init__(self, df: pd.DataFrame, image_dir: str, name: str = ''):
+        super(SimpleImageDetectionDataset, self).__init__(name=name)
+
+        self.df = df
+        self.image_dir = image_dir
+
+        self.logger.info(f'dataset[{self.name}] - initialized: image_dir={image_dir}')
+
+    def __len__(self):
+        return self.df.shape[0]
+
+    def __getitem__(self, index: int) -> Tuple[Img, Dict, int]:
+        row = self.df.iloc[index, :]
+
+        image_path = os.path.join(self.image_dir, row.path)
+        image = Image.open(image_path)
+
+        # TODO: load boxes/labels/masks
+        target = {}
 
         if self.debug:
             self.logger.debug(f'dataset[{self.name}] - #{index}: '
