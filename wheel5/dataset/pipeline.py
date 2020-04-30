@@ -103,11 +103,12 @@ class SimpleImageDataset(BaseDataset):
 
 class SimpleImageDetectionDataset(BaseDataset):
 
-    def __init__(self, df: pd.DataFrame, image_dir: str, name: str = ''):
+    def __init__(self, df: pd.DataFrame, image_dir: str, transform: Callable[[Img], Img] = None, name: str = ''):
         super(SimpleImageDetectionDataset, self).__init__(name=name)
 
         self.df = df
         self.image_dir = image_dir
+        self.transform = transform
 
         self.logger.info(f'dataset[{self.name}] - initialized: image_dir={image_dir}')
 
@@ -119,6 +120,9 @@ class SimpleImageDetectionDataset(BaseDataset):
 
         image_path = os.path.join(self.image_dir, row.path)
         image = Image.open(image_path)
+
+        if self.transform is not None:
+            image = self.transform(image)
 
         # TODO: load boxes/labels/masks
         target = {}
