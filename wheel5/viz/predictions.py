@@ -1,4 +1,6 @@
-from typing import List
+import os
+from pathlib import Path
+from typing import List, Optional
 
 import cv2
 import matplotlib.pyplot as plt
@@ -7,7 +9,7 @@ from PIL import Image
 from pandas import np
 from torchvision.transforms import functional as VTF
 
-from wheel5.tasks.detection import BoundingBoxes
+from wheel5.tasks.detection import BoundingBox
 
 
 def draw_classes(x: torch.Tensor,
@@ -58,14 +60,14 @@ def draw_classes(x: torch.Tensor,
 
 
 def draw_bboxes(x: List[torch.Tensor],
-                meta: List[BoundingBoxes],
-                classes: List[str],
+                bboxes: List[List[BoundingBox]],
+                categories: List[str],
                 orientation: str = 'vertical',
-                width: float = 15,
-                height: float = 15,
-                fontsize: int = 9):
+                width: float = 5,
+                height: float = 5,
+                directory: Optional[str] = None):
 
-    assert len(x) == len(meta)
+    assert len(x) == len(bboxes)
     n = len(x)
 
     if orientation == 'vertical':
@@ -86,14 +88,9 @@ def draw_bboxes(x: List[torch.Tensor],
         image_arr = np.asarray(image)
         image_arr = cv2.cvtColor(image_arr, cv2.COLOR_RGB2BGR)
 
-        for j in range(0, len(meta[i])):
-            bbox = meta[i].bboxes[j].cpu().int().numpy()
-            label = meta[i].labels[j].cpu().numpy()
-            score = meta[i].scores[j].cpu().numpy()
-
-            print(f'bbox={bbox}, label={classes[label]}')
-
-            image_arr = cv2.rectangle(image_arr, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (0, 0, 255), 4)
+        for bbox in bboxes[i]:
+            image_arr = cv2.rectangle(image_arr, bbox.pt_from, bbox.pt_to, (0, 0, 255), 2)
+            image_arr = cv2.putText(image_arr, f'{categories[bbox.label]} - {bbox.score:.3f}', bbox.pt_from, cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255))
 
         image_arr = cv2.cvtColor(image_arr, cv2.COLOR_BGR2RGB)
         image = Image.fromarray(image_arr)
@@ -101,5 +98,9 @@ def draw_bboxes(x: List[torch.Tensor],
         plt.grid(False)
         plt.axis('off')
         plt.imshow(image)
+
+        if directory is not None:
+            Path(directory).mkdir(parents=True, exist_ok=True)
+            image.save(os.path.join(directory, f'image{i}.jpg'))
 
     return fig
