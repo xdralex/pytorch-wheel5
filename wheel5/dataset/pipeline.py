@@ -260,7 +260,7 @@ class ImageHeatmapDataset(BaseDataset):
 
     def __getitem__(self, index: int):
         img, target, native, *rest = self.dataset[index]
-        w, h = img.size
+        w, h = img.byte_size
 
         heatmap = torch.from_numpy(self.heatmaps.arrays[str(native)])
 

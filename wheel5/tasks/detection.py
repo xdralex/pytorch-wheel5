@@ -1,16 +1,86 @@
+import math
+from dataclasses import dataclass
 from dataclasses import dataclass
 from struct import pack, unpack, calcsize
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Optional, Callable
 
 import torch
 
 
-@dataclass()
-class BoundingBox:
+@dataclass
+class Rectangle:
     pt_from: Tuple[int, int]
     pt_to: Tuple[int, int]
+
+    def __init__(self, pt_from: Tuple[int, int], pt_to: Tuple[int, int]):
+        assert pt_from[0] <= pt_to[0]
+        assert pt_from[1] <= pt_to[1]
+        self.pt_from = pt_from
+        self.pt_to = pt_to
+
+    @property
+    def x0(self) -> int:
+        return self.pt_from[0]
+
+    @property
+    def y0(self) -> int:
+        return self.pt_from[1]
+
+    @property
+    def x1(self) -> int:
+        return self.pt_to[0]
+
+    @property
+    def y1(self) -> int:
+        return self.pt_to[1]
+
+    @property
+    def width(self) -> int:
+        return self.x1 - self.x0
+
+    @property
+    def height(self) -> int:
+        return self.y1 - self.y0
+
+    @property
+    def area(self) -> int:
+        return self.width * self.height
+
+    def intersection(self, other: 'Rectangle') -> Optional['Rectangle']:
+        x0 = max(self.x0, other.x0)
+        y0 = max(self.y0, other.y0)
+        x1 = min(self.x1, other.x1)
+        y1 = min(self.y1, other.y1)
+
+        if x0 >= x1 or y0 >= y1:
+            return None
+        else:
+            return Rectangle(pt_from=(x0, y0), pt_to=(x1, y1))
+
+    def iou(self, other: 'Rectangle') -> float:
+        intersection = self.intersection(other)
+        if intersection is None:
+            return 0
+        else:
+            return intersection.area / (self.area + other.area - intersection.area)
+
+    def overlap(self, other: 'Rectangle') -> float:
+        intersection = self.intersection(other)
+        if intersection is None:
+            return 0
+        else:
+            return intersection.area / min(self.area, other.area)
+
+
+@dataclass
+class BoundingBox(Rectangle):
     label: int
     score: float
+
+    def __init__(self, pt_from: Tuple[int, int], pt_to: Tuple[int, int], label: int, score: float):
+        super(BoundingBox, self).__init__(pt_from, pt_to)
+        self.label = label
+        self.score = score
 
     def encode(self) -> bytes:
         return pack('IIIIId', self.pt_from[0], self.pt_from[1], self.pt_to[0], self.pt_to[1], self.label, self.score)
@@ -21,21 +91,52 @@ class BoundingBox:
         return BoundingBox(pt_from=(x0, y0), pt_to=(x1, y1), label=label, score=score)
 
     @staticmethod
-    def size() -> int:
+    def byte_size() -> int:
         return calcsize('IIIIId')
 
 
-def extract_bboxes(result: Dict[str, torch.Tensor],
-                   min_score: float = 0.0,
-                   top_bboxes: Optional[int] = None,
-                   categories: Optional[List[int]] = None) -> List[BoundingBox]:
+def non_maximum_suppression(bboxes: List[BoundingBox],
+                            threshold: float,
+                            ranking: str = 'score_sqrt_area',
+                            suppression: str = 'overlap') -> List[BoundingBox]:
 
-    result = {key: tensor.cpu() for key, tensor in result.items()}
+    if ranking == 'score':
+        bboxes = sorted(bboxes, key=lambda bbox: -bbox.score)
+    elif ranking == 'score_area':
+        bboxes = sorted(bboxes, key=lambda bbox: -bbox.score * bbox.area)
+    elif ranking == 'score_sqrt_area':
+        bboxes = sorted(bboxes, key=lambda bbox: -bbox.score * math.sqrt(bbox.area))
+    elif ranking == 'score_log_area':
+        bboxes = sorted(bboxes, key=lambda bbox: -bbox.score * (0 if bbox.area <= 1 else math.log2(bbox.area)))
+    else:
+        raise AssertionError(f'Ranking mode {ranking} is not supported')
 
-    bboxes = convert_bboxes(boxes=result['boxes'],
-                            labels=result['labels'],
-                            scores=result['scores'])
+    result = []
+    bboxes_temp = []
+    while len(bboxes) > 0:
+        best = bboxes[0]
+        result.append(best)
 
+        for candidate in bboxes[1:]:
+            if suppression == 'iou':
+                state = best.iou(candidate)
+            elif suppression == 'overlap':
+                state = best.overlap(candidate)
+            else:
+                raise AssertionError(f'Suppression mode {suppression} is not supported')
+
+            if state <= threshold:
+                bboxes_temp.append(candidate)
+
+        bboxes, bboxes_temp = bboxes_temp, []
+
+    return result
+
+
+def filter_bboxes(bboxes: List[BoundingBox],
+                  min_score: float = 0.0,
+                  top_bboxes: Optional[int] = None,
+                  categories: Optional[List[int]] = None) -> List[BoundingBox]:
     bboxes = [bbox for bbox in bboxes if bbox.score >= min_score]
 
     if categories is not None:
