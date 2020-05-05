@@ -3,7 +3,7 @@ import logging
 import os
 import pathlib
 from struct import pack, unpack
-from typing import Callable, Tuple, Any, List, Dict, Union
+from typing import Callable, Tuple, Any, List, Dict
 
 import albumentations as albu
 import lmdb
@@ -21,27 +21,11 @@ from torchvision.transforms import functional as VTF
 from wheel5.random import generate_random_seed
 from wheel5.tricks.heatmap import upsample_heatmap
 from .functional import cutmix, mixup, attentive_cutmix
+from ..storage import NdArraysStorage
+from ..util import shape
 
 
 # TODO: refactor into separate classification/detection/segmentation categories
-
-
-class NdArrayStorage(object):
-    def __init__(self, arrays: Dict[str, np.ndarray]):
-        self.arrays = arrays
-
-    def save(self, path: str):
-        pathlib.Path(path).mkdir(parents=True, exist_ok=True)
-        path = os.path.join(path, 'data.npz')
-        np.savez(path, **self.arrays)
-
-    @staticmethod
-    def load(path: str) -> 'NdArrayStorage':
-        path = os.path.join(path, 'data.npz')
-        with np.load(path, allow_pickle=False) as data:
-            arrays = {k: data[k] for k in data.files}
-            return NdArrayStorage(arrays)
-
 
 class BaseDataset(Dataset):
     def __init__(self, name: str = ''):
@@ -263,7 +247,7 @@ class ImageOneHotDataset(BaseDataset):
 
 
 class ImageHeatmapDataset(BaseDataset):
-    def __init__(self, dataset: Dataset, heatmaps: NdArrayStorage, inter_mode: str = 'bilinear', name: str = ''):
+    def __init__(self, dataset: Dataset, heatmaps: NdArraysStorage, inter_mode: str = 'bilinear', name: str = ''):
         super(ImageHeatmapDataset, self).__init__(name=name)
         self.dataset = dataset
         self.heatmaps = heatmaps
@@ -469,23 +453,6 @@ class AlbumentationsTransform(object):
     def __repr__(self):
         return f'{self.__class__.__name__}({self.full_transform })'
 
-
-def shape(image: Union[Img, torch.Tensor, np.ndarray]) -> str:
-    if isinstance(image, Img):
-        w, h = image.size
-        prefix = 'image'
-        dims = [h, w]
-    elif isinstance(image, torch.Tensor):
-        prefix = 'tensor'
-        dims = list(image.shape)
-    elif isinstance(image, np.ndarray):
-        prefix = 'ndarray'
-        dims = list(image.shape)
-    else:
-        raise NotImplementedError(f'image type: {type(image)}')
-
-    dims = [str(dim) for dim in dims]
-    return f'{prefix}({"x".join(dims)})'
 
 
 def targets(dataset: Dataset) -> List[Any]:
