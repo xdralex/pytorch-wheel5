@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from struct import pack, unpack, calcsize
 from typing import List, Tuple, Dict, Optional
 
 import torch
@@ -10,6 +11,18 @@ class BoundingBox:
     pt_to: Tuple[int, int]
     label: int
     score: float
+
+    def encode(self) -> bytes:
+        return pack('IIIIId', self.pt_from[0], self.pt_from[1], self.pt_to[0], self.pt_to[1], self.label, self.score)
+
+    @staticmethod
+    def decode(b: bytes) -> 'BoundingBox':
+        x0, y0, x1, y1, label, score = unpack('IIIIId', b)
+        return BoundingBox(pt_from=(x0, y0), pt_to=(x1, y1), label=label, score=score)
+
+    @staticmethod
+    def size() -> int:
+        return calcsize('IIIIId')
 
 
 def extract_bboxes(result: Dict[str, torch.Tensor],
