@@ -6,6 +6,8 @@ from typing import TypeVar, List
 import lmdb
 import numpy as np
 
+from wheel5.tasks.detection import BoundingBox
+
 T = TypeVar('T')
 
 

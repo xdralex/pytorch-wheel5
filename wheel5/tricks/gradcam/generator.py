@@ -51,6 +51,9 @@ class GradCAMBase(object):
         self.forward_handle.remove()
         self.backward_handle.remove()
 
+        self.activations_closure.value = None
+        self.gradients_closure.value = None
+
         self.entered = False
 
     def __enter__(self):
