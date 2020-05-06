@@ -1,8 +1,7 @@
 import math
 from dataclasses import dataclass
-from dataclasses import dataclass
 from struct import pack, unpack, calcsize
-from typing import List, Tuple, Optional, Callable
+from typing import List, Tuple, Optional, Union
 
 import torch
 
@@ -71,6 +70,27 @@ class Rectangle:
         else:
             return intersection.area / min(self.area, other.area)
 
+    def expand(self, coeff: Union[float, Tuple[float, float]]) -> 'Rectangle':
+        if isinstance(coeff, float):
+            w_c, h_c = coeff, coeff
+        elif isinstance(coeff, tuple):
+            w_c, h_c = coeff
+        else:
+            raise ValueError(f'Expansion coefficient must be either float or (float, float)')
+
+        new_width = self.width * (1 + w_c)
+        new_height = self.height * (1 + h_c)
+
+        center_x = (self.x0 + self.x1) / 2
+        center_y = (self.y0 + self.y1) / 2
+
+        new_x0 = round(center_x - new_width / 2)
+        new_x1 = round(center_x + new_width / 2)
+        new_y0 = round(center_y - new_height / 2)
+        new_y1 = round(center_y + new_height / 2)
+
+        return Rectangle(pt_from=(new_x0, new_y0), pt_to=(new_x1, new_y1))
+
 
 @dataclass
 class BoundingBox(Rectangle):
@@ -94,6 +114,17 @@ class BoundingBox(Rectangle):
     def byte_size() -> int:
         return calcsize('IIIIId')
 
+    def intersection(self, other: 'Rectangle') -> Optional['BoundingBox']:
+        rect = super(BoundingBox, self).intersection(other)
+        if rect is None:
+            return None
+        else:
+            return BoundingBox(rect.pt_from, rect.pt_to, self.label, self.score)
+
+    def expand(self, coeff: Union[float, Tuple[float, float]]) -> 'BoundingBox':
+        rect = super(BoundingBox, self).expand(coeff)
+        return BoundingBox(rect.pt_from, rect.pt_to, self.label, self.score)
+
 
 def non_maximum_suppression(bboxes: List[BoundingBox],
                             threshold: float,
@@ -109,7 +140,7 @@ def non_maximum_suppression(bboxes: List[BoundingBox],
     elif ranking == 'score_log_area':
         bboxes = sorted(bboxes, key=lambda bbox: -bbox.score * (0 if bbox.area <= 1 else math.log2(bbox.area)))
     else:
-        raise AssertionError(f'Ranking mode {ranking} is not supported')
+        raise ValueError(f'Ranking mode {ranking} is not supported')
 
     result = []
     bboxes_temp = []
@@ -123,7 +154,7 @@ def non_maximum_suppression(bboxes: List[BoundingBox],
             elif suppression == 'overlap':
                 state = best.overlap(candidate)
             else:
-                raise AssertionError(f'Suppression mode {suppression} is not supported')
+                raise ValueError(f'Suppression mode {suppression} is not supported')
 
             if state <= threshold:
                 bboxes_temp.append(candidate)
