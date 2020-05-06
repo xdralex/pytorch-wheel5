@@ -2,7 +2,7 @@ from numbers import Number
 from typing import Union
 
 import cv2
-from albumentations import ImageOnlyTransform
+from albumentations import ImageOnlyTransform, DualTransform
 
 from .functional import rescale, pad_to_square
 
@@ -35,6 +35,26 @@ class PadToSquare(ImageOnlyTransform):
 
     def get_transform_init_args_names(self):
         return "fill",
+
+    def get_params_dependent_on_targets(self, params):
+        raise NotImplementedError()
+
+
+class Identity(DualTransform):
+    def __init__(self, always_apply=False, p=1.0):
+        super(Identity, self).__init__(always_apply, p)
+
+    def apply(self, img, **params):
+        return img
+
+    def apply_to_bbox(self, bbox, **params):
+        return bbox
+
+    def apply_to_keypoint(self, keypoint, **params):
+        return keypoint
+
+    def get_transform_init_args_names(self):
+        return ()
 
     def get_params_dependent_on_targets(self, params):
         raise NotImplementedError()
