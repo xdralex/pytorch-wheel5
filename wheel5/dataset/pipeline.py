@@ -274,7 +274,7 @@ class ImageHeatmapDataset(BaseDataset):
             self.logger.debug(f'dataset[{self.name}] - #{index}[{native}]: '
                               f'image={shape(img)}, target={target}, heatmap={shape(heatmap)}, upsampled={shape(upsampled)}')
 
-        return (img, target, native, upsampled, *rest)
+        return (img, target, native, upsampled, path, *rest)
 
 
 class ImageBBoxCropDataset(BaseDataset):
