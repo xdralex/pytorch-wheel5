@@ -1,30 +1,12 @@
-import json
 import os
 import pathlib
-from typing import Dict, TypeVar, Generic, List
+import pickle
+from typing import TypeVar, List
 
 import lmdb
 import numpy as np
 
-
 T = TypeVar('T')
-
-
-class NdArraysStorage(object):
-    def __init__(self, arrays: Dict[str, np.ndarray]):
-        self.arrays = arrays
-
-    def save(self, path: str):
-        pathlib.Path(path).mkdir(parents=True, exist_ok=True)
-        path = os.path.join(path, 'data.npz')
-        np.savez(path, **self.arrays)
-
-    @staticmethod
-    def load(path: str) -> 'NdArraysStorage':
-        path = os.path.join(path, 'data.npz')
-        with np.load(path, allow_pickle=False) as data:
-            arrays = {k: data[k] for k in data.files}
-            return NdArraysStorage(arrays)
 
 
 class LMDBDict(object):
@@ -64,23 +46,6 @@ class LMDBDict(object):
         self.lmdb_env.close()
 
 
-class DictStorage(Generic[T]):
-    def __init__(self, data: Dict[str, T]):
-        self.data = data
-
-    def save(self, path: str, compact: bool = True):
-        pathlib.Path(path).mkdir(parents=True, exist_ok=True)
-        path = os.path.join(path, 'data.json')
-        with open(path, mode='x') as f:
-            json.dump(self.data, f, indent=None if compact else 4)
-
-    @staticmethod
-    def load(path: str) -> 'DictStorage[T]':
-        path = os.path.join(path, 'data.json')
-        with open(path, mode='r') as f:
-            return json.load(f)
-
-
 def encode_list(lst: List[bytes], size: int) -> bytes:
     for x in lst:
         assert len(x) == size
@@ -98,3 +63,11 @@ def decode_list(b: bytes, size: int) -> List[bytes]:
         lst.append(chunk)
 
     return lst
+
+
+def encode_ndarray(arr: np.ndarray) -> bytes:
+    return pickle.dumps(arr)
+
+
+def decode_ndarray(b: bytes) -> np.ndarray:
+    return pickle.loads(b)

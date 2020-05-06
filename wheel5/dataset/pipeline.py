@@ -18,10 +18,10 @@ from torch.nn import functional as F
 from torch.utils.data import Dataset
 from torchvision.transforms import functional as VTF
 
+from airdetect.storage import HeatmapLMDBDict
 from wheel5.random import generate_random_seed
 from wheel5.tricks.heatmap import upsample_heatmap
 from .functional import cutmix, mixup, attentive_cutmix
-from ..storage import NdArraysStorage
 from ..util import shape
 
 
@@ -48,7 +48,7 @@ class BaseDataset(Dataset):
         return self._random_state
 
 
-class SimpleImageDataset(BaseDataset):
+class SimpleImageClassificationDataset(BaseDataset):
     r"""A dataset loading images from the supplied directory.
 
         This dataset takes a user-provided dataframe ['path', 'target', ...] to
@@ -57,7 +57,7 @@ class SimpleImageDataset(BaseDataset):
         """
 
     def __init__(self, df: pd.DataFrame, image_dir: str, transform: Callable[[Img], Img] = None, name: str = ''):
-        super(SimpleImageDataset, self).__init__(name=name)
+        super(SimpleImageClassificationDataset, self).__init__(name=name)
 
         self.df = df
         self.image_dir = image_dir
@@ -68,7 +68,7 @@ class SimpleImageDataset(BaseDataset):
     def __len__(self) -> int:
         return self.df.shape[0]
 
-    def __getitem__(self, index: int) -> Tuple[Img, Any, int]:
+    def __getitem__(self, index: int) -> Tuple[Img, Any, int, str]:
         row = self.df.iloc[index, :]
 
         target = row.target
@@ -82,7 +82,7 @@ class SimpleImageDataset(BaseDataset):
             self.logger.debug(f'dataset[{self.name}] - #{index}: '
                               f'image={shape(image)}, target={target}')
 
-        return image, target, index
+        return image, target, index, row.path
 
 
 class SimpleImageDetectionDataset(BaseDataset):
@@ -99,7 +99,7 @@ class SimpleImageDetectionDataset(BaseDataset):
     def __len__(self):
         return self.df.shape[0]
 
-    def __getitem__(self, index: int) -> Tuple[Img, Dict, int]:
+    def __getitem__(self, index: int) -> Tuple[Img, Dict, int, str]:
         row = self.df.iloc[index, :]
 
         image_path = os.path.join(self.image_dir, row.path)
@@ -115,7 +115,7 @@ class SimpleImageDetectionDataset(BaseDataset):
             self.logger.debug(f'dataset[{self.name}] - #{index}: '
                               f'image={shape(image)}, target={target}')
 
-        return image, target, index
+        return image, target, index, row.path
 
 
 class LMDBImageDataset(BaseDataset):
@@ -203,9 +203,9 @@ class LMDBImageDataset(BaseDataset):
     def __len__(self) -> int:
         return self.df.shape[0]
 
-    def __getitem__(self, index: int) -> Tuple[Img, Any, int]:
+    def __getitem__(self, index: int) -> Tuple[Img, Any, int, str]:
         row = self.df.iloc[index, :]
-        target = row['target']
+        target = row.target
 
         with self.lmdb_env.begin(write=False) as txn:
             k_data = f'data#{index}'.encode('ascii')
@@ -221,7 +221,7 @@ class LMDBImageDataset(BaseDataset):
             self.logger.debug(f'dataset[{self.name}] - #{index}: '
                               f'image={shape(image)}, target={target}')
 
-        return image, target, index
+        return image, target, index, row.path
 
 
 class ImageOneHotDataset(BaseDataset):
@@ -247,22 +247,22 @@ class ImageOneHotDataset(BaseDataset):
 
 
 class ImageHeatmapDataset(BaseDataset):
-    def __init__(self, dataset: Dataset, heatmaps: NdArraysStorage, inter_mode: str = 'bilinear', name: str = ''):
+    def __init__(self, dataset: Dataset, heatmaps: HeatmapLMDBDict, inter_mode: str = 'bilinear', name: str = ''):
         super(ImageHeatmapDataset, self).__init__(name=name)
         self.dataset = dataset
         self.heatmaps = heatmaps
         self.inter_mode = inter_mode
 
-        self.logger.info(f'dataset[{self.name}] - initialized: heatmaps={len(self.heatmaps.arrays)}, inter_mode={self.inter_mode}')
+        self.logger.info(f'dataset[{self.name}] - initialized: inter_mode={self.inter_mode}')
 
     def __len__(self) -> int:
         return len(self.dataset)
 
     def __getitem__(self, index: int):
-        img, target, native, *rest = self.dataset[index]
-        w, h = img.byte_size
+        img, target, native, path, *rest = self.dataset[index]
+        w, h = img.size
 
-        heatmap = torch.from_numpy(self.heatmaps.arrays[str(native)])
+        heatmap = torch.from_numpy(self.heatmaps[path])
 
         upsampled = heatmap.unsqueeze(dim=0)
         upsampled = upsample_heatmap(upsampled, h, w, self.inter_mode)
@@ -292,10 +292,12 @@ class ImageAttentiveCutMixDataset(BaseDataset):
     def __getitem__(self, index: int):
         choice = self.random_state.randint(len(self.dataset))
 
-        img_dst, lb_dst, native_dst, _ = self.dataset[index]
-        img_src, lb_src, native_src, heatmap_src = self.dataset[choice]
+        img_dst, lb_dst, native_dst, _, path_dst, *_ = self.dataset[index]
+        img_src, lb_src, native_src, heatmap_src, path_src, *_ = self.dataset[choice]
 
         native = -1
+        path = ''
+
         img_dst, img_src = VTF.to_tensor(img_dst), VTF.to_tensor(img_src)
         img, lb, weight = attentive_cutmix(img_src=img_src, lb_src=lb_src,
                                            img_dst=img_dst, lb_dst=lb_dst,
@@ -310,7 +312,7 @@ class ImageAttentiveCutMixDataset(BaseDataset):
                               f'    mix #{index}[{native}]: image={shape(img)}, lb={lb}, weight={weight}')
 
         img = VTF.to_pil_image(img)
-        return img, lb, native
+        return img, lb, native, path
 
 
 class ImageCutMixDataset(BaseDataset):
@@ -330,10 +332,12 @@ class ImageCutMixDataset(BaseDataset):
     def __getitem__(self, index: int):
         choice = self.random_state.randint(len(self.dataset))
 
-        img_dst, lb_dst, native_dst = self.dataset[index]
-        img_src, lb_src, native_src = self.dataset[choice]
+        img_dst, lb_dst, native_dst, path_dst, *_ = self.dataset[index]
+        img_src, lb_src, native_src, path_src, *_ = self.dataset[choice]
 
         native = -1
+        path = ''
+
         img_dst, img_src = VTF.to_tensor(img_dst), VTF.to_tensor(img_src)
         img, lb, weight = cutmix(img_src=img_src, lb_src=lb_src,
                                  img_dst=img_dst, lb_dst=lb_dst,
@@ -347,7 +351,7 @@ class ImageCutMixDataset(BaseDataset):
                               f'    mix #{index}[{native}]: image={shape(img)}, lb={lb}, weight={weight}')
 
         img = VTF.to_pil_image(img)
-        return img, lb, native
+        return img, lb, native, path
 
 
 class ImageMixupDataset(BaseDataset):
@@ -364,8 +368,8 @@ class ImageMixupDataset(BaseDataset):
     def __getitem__(self, index: int):
         choice = self.random_state.randint(len(self.dataset))
 
-        img_dst, lb_dst, native_dst = self.dataset[index]
-        img_src, lb_src, native_src = self.dataset[choice]
+        img_dst, lb_dst, native_dst, path_dst, *_ = self.dataset[index]
+        img_src, lb_src, native_src, path_src, *_ = self.dataset[choice]
 
         img_dst, img_src = VTF.to_tensor(img_dst), VTF.to_tensor(img_src)
         img, lb, weight = mixup(img_src=img_src, lb_src=lb_src,
@@ -373,6 +377,8 @@ class ImageMixupDataset(BaseDataset):
                                 alpha=self.alpha, random_state=self.random_state)
 
         native = -1
+        path = ''
+
         if self.debug:
             self.logger.debug(f'dataset[{self.name}]\n'
                               f'    dst #{index}[{native_dst}]: image={shape(img_dst)}, lb={lb_dst}\n'
@@ -380,7 +386,7 @@ class ImageMixupDataset(BaseDataset):
                               f'    mix #{index}[{native}]: image={shape(img)}, lb={lb}, weight={weight}')
 
         img = VTF.to_pil_image(img)
-        return img, lb, native
+        return img, lb, native, path
 
 
 class TransformDataset(BaseDataset):
@@ -452,7 +458,6 @@ class AlbumentationsTransform(object):
 
     def __repr__(self):
         return f'{self.__class__.__name__}({self.full_transform })'
-
 
 
 def targets(dataset: Dataset) -> List[Any]:
