@@ -1,7 +1,7 @@
 import os
 import pathlib
 import pickle
-from typing import TypeVar, List
+from typing import TypeVar, List, Tuple
 
 import lmdb
 import numpy as np
@@ -41,6 +41,28 @@ class LMDBDict(object):
         with self.lmdb_env.begin(write=True) as txn:
             txn.delete(key.encode('ascii'))
 
+    def __iter__(self):
+        with self.lmdb_env.begin(write=False) as txn:
+            with txn.cursor() as cursor:
+                for key, _ in cursor:
+                    yield key.decode('ascii')
+        return
+
+    def keys(self) -> List[str]:
+        with self.lmdb_env.begin(write=False) as txn:
+            with txn.cursor() as cursor:
+                return list([key.decode('ascii') for key, _ in cursor])
+
+    def values(self) -> List[bytes]:
+        with self.lmdb_env.begin(write=False) as txn:
+            with txn.cursor() as cursor:
+                return list([value for _, value in cursor])
+
+    def items(self) -> List[Tuple[str, bytes]]:
+        with self.lmdb_env.begin(write=False) as txn:
+            with txn.cursor() as cursor:
+                return list([(key.decode('ascii'), value) for key, value in cursor])
+
     def __enter__(self):
         return self
 
@@ -66,6 +88,18 @@ class HeatmapLMDBDict(object):
     def __delitem__(self, key: str):
         del self.lmdb_dict[key]
 
+    def __iter__(self):
+        yield from self.lmdb_dict
+
+    def keys(self) -> List[str]:
+        return self.lmdb_dict.keys()
+
+    def values(self) -> List[np.ndarray]:
+        return [decode_ndarray(value) for value in self.lmdb_dict.values()]
+
+    def items(self) -> List[Tuple[str, np.ndarray]]:
+        return [(key, decode_ndarray(value)) for key, value in self.lmdb_dict.items()]
+
 
 class BoundingBoxesLMDBDict(object):
     def __init__(self, lmdb_dict: LMDBDict):
@@ -76,14 +110,34 @@ class BoundingBoxesLMDBDict(object):
 
     def __getitem__(self, key: str) -> List[BoundingBox]:
         data = self.lmdb_dict[key]
-        return [BoundingBox.decode(b) for b in decode_list(data, size=BoundingBox.byte_size())]
+        return self._decode_bboxes(data)
 
     def __setitem__(self, key: str, value: List[BoundingBox]):
-        data = encode_list([bbox.encode() for bbox in value], size=BoundingBox.byte_size())
+        data = self._encode_bboxes(value)
         self.lmdb_dict[key] = data
 
     def __delitem__(self, key: str):
         del self.lmdb_dict[key]
+
+    def __iter__(self):
+        yield from self.lmdb_dict
+
+    def keys(self) -> List[str]:
+        return self.lmdb_dict.keys()
+
+    def values(self) -> List[List[BoundingBox]]:
+        return [self._decode_bboxes(value) for value in self.lmdb_dict.values()]
+
+    def items(self) -> List[Tuple[str, List[BoundingBox]]]:
+        return [(key, self._decode_bboxes(value)) for key, value in self.lmdb_dict.items()]
+
+    @staticmethod
+    def _encode_bboxes(value: List[BoundingBox]) -> bytes:
+        return encode_list([bbox.encode() for bbox in value], size=BoundingBox.byte_size())
+
+    @staticmethod
+    def _decode_bboxes(data: bytes) -> List[BoundingBox]:
+        return [BoundingBox.decode(b) for b in decode_list(data, size=BoundingBox.byte_size())]
 
 
 def encode_list(lst: List[bytes], size: int) -> bytes:
