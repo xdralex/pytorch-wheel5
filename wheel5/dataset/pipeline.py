@@ -277,82 +277,6 @@ class ImageHeatmapDataset(BaseDataset):
         return (img, target, native, upsampled, path, *rest)
 
 
-class ImageBBoxCropDataset(BaseDataset):
-    def __init__(self,
-                 dataset: Dataset,
-                 bboxes_db: BoundingBoxesLMDBDict,
-                 use_mask: bool = False,
-                 expand_coeff: float = 0.0,
-                 min_score: float = 0.0,
-                 nms_threshold: Optional[float] = None,
-                 nms_ranking: str = 'score_sqrt_area',
-                 nms_suppression: str = 'overlap',
-                 name: str = ''):
-        super(ImageBBoxCropDataset, self).__init__(name=name)
-        self.dataset = dataset
-        self.bboxes_db = bboxes_db
-
-        self.use_mask = use_mask
-        self.expand_coeff = expand_coeff
-        self.min_score = min_score
-        self.nms_threshold = nms_threshold
-        self.nms_ranking = nms_ranking
-        self.nms_suppression = nms_suppression
-
-        self.logger.info(f'dataset[{self.name}] - initialized: '
-                         f'use_mask={self.use_mask}, expand_coeff={self.expand_coeff:.3f}, min_score={self.min_score:.3f}, '
-                         f'nms_threshold={self.nms_threshold:.3f}, nms_ranking={self.nms_ranking}, nms_suppression={self.nms_suppression}')
-
-    def __len__(self) -> int:
-        return len(self.dataset)
-
-    def __getitem__(self, index: int):
-        if self.use_mask:
-            img, target, native, mask, path, *rest = self.dataset[index]
-        else:
-            img, target, native, path, *rest = self.dataset[index]
-            mask = None
-
-        w, h = img.size
-
-        img_rect = Rectangle(pt_from=(0, 0), pt_to=(w - 1, h - 1))
-
-        bboxes = self.bboxes_db[path]
-        bboxes = filter_bboxes(bboxes, min_score=self.min_score)
-
-        if self.nms_threshold is not None:
-            bboxes = non_maximum_suppression(bboxes, self.nms_threshold, self.nms_ranking, self.nms_suppression)
-
-        if len(bboxes) > 0:
-            bbox = bboxes[0]
-            bbox = bbox.expand(self.expand_coeff)
-            bbox = bbox.intersection(img_rect)
-
-            transform = albu.Crop(x_min=bbox.x0, y_min=bbox.y0, x_max=bbox.x1, y_max=bbox.y1, always_apply=True)
-        else:
-            transform = albu_ext.Identity
-
-        if mask is not None:
-            augmented = transform(image=np.array(img), mask=mask.numpy())
-            img_aug = Image.fromarray(augmented['image'])
-            mask_aug = torch.from_numpy(augmented['mask'])
-
-            if self.debug:
-                self.logger.debug(f'dataset[{self.name}] - #{index}[{native}]: '
-                                  f'image={shape(img)}, mask={shape(mask)}, target={target}, image^={shape(img_aug)}, mask^={shape(mask_aug)}')
-
-            return (img_aug, target, native, mask_aug, path, *rest)
-        else:
-            augmented = transform(image=np.array(img))
-            img_aug = Image.fromarray(augmented['image'])
-
-            if self.debug:
-                self.logger.debug(f'dataset[{self.name}] - #{index}[{native}]: '
-                                  f'image={shape(img)}, target={target}, image^={shape(img_aug)}')
-
-                return (img_aug, target, native, path, *rest)
-
-
 class ImageAttentiveCutMixDataset(BaseDataset):
     def __init__(self, dataset: Dataset, alpha: float, q_min: float = 0.0, q_max: float = 1.0, mode: str = 'compact', name: str = ''):
         super(ImageAttentiveCutMixDataset, self).__init__(name)
@@ -516,6 +440,7 @@ class AlbumentationsDataset(BaseDataset):
             return (img_aug, target, native, mask_aug, *rest)
         else:
             img, target, native, *rest = self.dataset[index]
+
             augmented = self.transform(image=np.array(img))
             img_aug = Image.fromarray(augmented['image'])
 
