@@ -135,6 +135,9 @@ class LMDBImageDataset(BaseDataset):
                check_fingerprint: bool = True,
                name: str = ''):
 
+        logger = logging.getLogger(f'{__name__}')
+        logger.info(f'Initializing cached dataset[{name}] - entries={len(df)}')
+
         if os.path.exists(lmdb_path):
             if not os.path.isdir(lmdb_path):
                 raise Exception(f'LMDB path {lmdb_path} must be a directory')
@@ -165,23 +168,29 @@ class LMDBImageDataset(BaseDataset):
             f.write(f'{LMDBImageDataset.fingerprint(df, image_dir, transform)}\n')
 
         with lmdb.open(lmdb_path, map_size=lmdb_map_size, subdir=True) as lmdb_env:
-            with lmdb_env.begin(write=True) as txn:
-                for index, row in enumerate(df.itertuples()):
-                    image_path = os.path.join(image_dir, row.path)
-                    image = Image.open(image_path)
+            tuples = list(enumerate(df.itertuples()))
 
-                    if transform is not None:
-                        image = transform(image)
+            while len(tuples) > 0:
+                batch = tuples[:128]
+                tuples = tuples[128:]
 
-                    w, h = image.size
+                with lmdb_env.begin(write=True) as txn:
+                    for index, row in batch:
+                        image_path = os.path.join(image_dir, row.path)
+                        image = Image.open(image_path)
 
-                    k_data = f'data#{index}'.encode('ascii')
-                    v_data = image.tobytes()
-                    txn.put(k_data, v_data)
+                        if transform is not None:
+                            image = transform(image)
 
-                    k_meta = f'meta#{index}'.encode('ascii')
-                    v_meta = pack('HH', w, h)
-                    txn.put(k_meta, v_meta)
+                        w, h = image.size
+
+                        k_data = f'data#{index}'.encode('ascii')
+                        v_data = image.tobytes()
+                        txn.put(k_data, v_data)
+
+                        k_meta = f'meta#{index}'.encode('ascii')
+                        v_meta = pack('HH', w, h)
+                        txn.put(k_meta, v_meta)
 
     @staticmethod
     def fingerprint(df: pd.DataFrame, image_dir: str, transform: Callable[[Img], Img]) -> str:
@@ -198,7 +207,7 @@ class LMDBImageDataset(BaseDataset):
         self.df = df
         self.lmdb_env = lmdb.open(lmdb_path, readonly=True, lock=False, meminit=False, readahead=False, map_size=lmdb_map_size, subdir=True)
 
-        self.logger.info(f'dataset[{self.name}] - initialized: lmdb_path={lmdb_path}')
+        self.logger.info(f'dataset[{self.name}] - initialized: lmdb_path={lmdb_path}, entries={len(df)}')
 
     def __len__(self) -> int:
         return self.df.shape[0]
