@@ -84,12 +84,23 @@ class Rectangle:
         center_x = (self.x0 + self.x1) / 2
         center_y = (self.y0 + self.y1) / 2
 
-        new_x0 = round(center_x - new_width / 2)
-        new_x1 = round(center_x + new_width / 2)
-        new_y0 = round(center_y - new_height / 2)
-        new_y1 = round(center_y + new_height / 2)
+        new_x0 = int(round(center_x - new_width / 2))
+        new_x1 = int(round(center_x + new_width / 2))
+        new_y0 = int(round(center_y - new_height / 2))
+        new_y1 = int(round(center_y + new_height / 2))
 
         return Rectangle(pt_from=(new_x0, new_y0), pt_to=(new_x1, new_y1))
+
+    def scale(self, coeff: Union[float, Tuple[float, float]]) -> 'Rectangle':
+        if isinstance(coeff, float):
+            w_c, h_c = coeff, coeff
+        elif isinstance(coeff, tuple):
+            w_c, h_c = coeff
+        else:
+            raise ValueError(f'Scaling coefficient must be either float or (float, float)')
+
+        return Rectangle(pt_from=(int(round(self.x0 * w_c)), int(round(self.y0 * h_c))),
+                         pt_to=(int(round(self.x1 * w_c)), int(round(self.y1 * h_c))))
 
 
 @dataclass
@@ -123,6 +134,10 @@ class BoundingBox(Rectangle):
 
     def expand(self, coeff: Union[float, Tuple[float, float]]) -> 'BoundingBox':
         rect = super(BoundingBox, self).expand(coeff)
+        return BoundingBox(rect.pt_from, rect.pt_to, self.label, self.score)
+
+    def scale(self, coeff: Union[float, Tuple[float, float]]) -> 'BoundingBox':
+        rect = super(BoundingBox, self).scale(coeff)
         return BoundingBox(rect.pt_from, rect.pt_to, self.label, self.score)
 
 
