@@ -3,7 +3,7 @@ import logging
 import os
 import pathlib
 from struct import pack, unpack
-from typing import Callable, Tuple, Any, List, Dict, Optional
+from typing import Callable, Tuple, Any, List, Dict
 
 import albumentations as albu
 import lmdb
@@ -19,11 +19,9 @@ from torch.utils.data import Dataset
 from torchvision.transforms import functional as VTF
 
 from wheel5.random import generate_random_seed
+from wheel5.storage import HeatmapLMDBDict
 from wheel5.tricks.heatmap import upsample_heatmap
-from wheel5.storage import HeatmapLMDBDict, BoundingBoxesLMDBDict
-import wheel5.transforms.albumentations as albu_ext
 from .functional import cutmix, mixup, attentive_cutmix
-from ..tasks.detection import filter_bboxes, non_maximum_suppression, Rectangle
 from ..util import shape
 
 

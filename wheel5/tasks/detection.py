@@ -164,6 +164,7 @@ def non_maximum_suppression(bboxes: List[BoundingBox],
     return result
 
 
+# TODO: top_bboxes should be removed as it conflicts with NMS logic
 def filter_bboxes(bboxes: List[BoundingBox],
                   min_score: float = 0.0,
                   top_bboxes: Optional[int] = None,
